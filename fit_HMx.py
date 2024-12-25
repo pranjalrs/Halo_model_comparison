@@ -105,7 +105,7 @@ variance_Pk_mm = Pk_mm**2/Nk
 Pk_mp, box_size = np.loadtxt('../magneticum-data/data/Pylians/Pk_matterxpressure/Box2_CIC_R1024.txt'), 352
 
 k_mp = Pk_mp[:, 0]
-Pk_mp = Pk_mp[:, 1]
+Pk_mp = Pk_mp[:, 1]*1e3  # Convert to eV/cm^3
 kmax = 6 # h/Mpc
 Pk_mp,	k_mp = Pk_mp[k_mp < kmax], k_mp[k_mp < kmax]
 
@@ -144,6 +144,10 @@ if __name__=='__main__':
 		k_sim, Pk_sim, variance = k_mp, Pk_mp, variance_Pk_mp
 		Pk_label = '$P_{mp}(k)$ [ev/cm$^3$] (Mpc/h)$^3$'
 		save_dir = 'Pk_mp_fit'
+	
+	else:
+		print(f'Field {field} is not a valid option!')
+		sys.exit()
 
 	ndim = len(initial_parameters)
 	nwalkers = 5*len(fit_params)
@@ -193,7 +197,7 @@ if __name__=='__main__':
 	#----------------------------------- 5. Plot best fit-----------------------------------#
 	best_fit = np.mean(flat_chain, axis=0)
 
-	best_fit_Pk = get_hmcode_pk(best_fit)
+	best_fit_Pk = get_hmcode_pk(best_fit, fit_params, field)
 	best_fit_Pk = np.interp(k_sim, k, best_fit_Pk[0,0,0])
 
 	fig, ax = plt.subplots(2, 2, figsize=(15, 6), sharex=False, gridspec_kw={'height_ratios': [3, 1]})
