@@ -23,7 +23,7 @@ def get_hmcode_pk(param_values=None, fit_params=None, field=None):
 
 	if param_values is not None:
 		for i,name in enumerate(fit_params):
-			if 'm0' in name:
+			if 'm0' in name or 'twhim' in name:
 				hmcode_model.__setattr__(name, 10**param_values[i])
 			else:
 				hmcode_model.__setattr__(name, param_values[i])
@@ -41,8 +41,6 @@ def log_likelihood(param_values, fit_params, k_data, Pk_data, variance, field=No
 			return -np.inf
 
 	hmcode_pofk = get_hmcode_pk(param_values, fit_params, field)
-	# The output of calculate_nonlinear_power_spectrum has
-	# shape (n_field, n_field, n_z, n_k).
 	if field == 'matter-matter':
 		Pk_theory = hmcode_pofk[0, 0, 0]
 
@@ -111,7 +109,7 @@ Pk_mp,	k_mp = Pk_mp[k_mp < kmax], k_mp[k_mp < kmax]
 
 delta_k = 2*np.pi/box_size
 Nk = 2*np.pi * (k_mp/delta_k)**2
-variance_Pk_mp = Pk_mm**2/Nk
+variance_Pk_mp = Pk_mp**2/Nk
 
 fit_params_mm = ['eps_array', 'gamma_array', 'm0_array']
 priors_mm = [[-0.95, 3], [1.05, 3], [10, 17]]
@@ -184,7 +182,7 @@ if __name__=='__main__':
 
 	# Now run long chain
 			print('Final iteration')
-			sampler = emcee.EnsembleSampler(nwalkers, ndim, log_likelihood, args=(k_sim, Pk_sim), pool=pool)
+			sampler = emcee.EnsembleSampler(nwalkers, ndim, log_likelihood, args=(fit_params, k_sim, Pk_sim, variance, field), pool=pool)
 			sampler.run_mcmc(initial, nsteps, progress=True)
 			flat_chain = sampler.get_chain(flat=True, discard=int(nsteps*0.7))
 			walkers.append(sampler.get_chain(flat=False))
@@ -198,7 +196,14 @@ if __name__=='__main__':
 	best_fit = np.mean(flat_chain, axis=0)
 
 	best_fit_Pk = get_hmcode_pk(best_fit, fit_params, field)
-	best_fit_Pk = np.interp(k_sim, k, best_fit_Pk[0,0,0])
+    
+	if field == 'matter-matter':
+		best_fit_Pk = np.interp(k_sim, k, best_fit_Pk[0, 0, 0])
+
+
+	elif field == 'matter-pressure':
+		best_fit_Pk = np.interp(k_sim, k, best_fit_Pk[0, 1, 0])
+
 
 	fig, ax = plt.subplots(2, 2, figsize=(15, 6), sharex=False, gridspec_kw={'height_ratios': [3, 1]})
 
