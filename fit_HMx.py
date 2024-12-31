@@ -38,30 +38,38 @@ def get_hmcode_pk(param_values=None, fit_params=None, field=None):
 
 	return hmcode_pofk
 
-def log_likelihood(param_values, fit_params, k_data, Pk_data, variance, field=None):
-	for i in range(len(param_values)):
-		prior = priors[i]
-		if not (prior[0] <= param_values[i] <= prior[1]):
-			return -np.inf
+def log_likelihood(param_values, fit_params, k_data, Pk_data, variance, field=None, fit_response=False):
+	if param_values is not None:	
+		for i in range(len(param_values)):
+			prior = priors[i]
+			if not (prior[0] <= param_values[i] <= prior[1]):
+				return -np.inf
+
+	response_factor_hmx = hmcode_pofk_dmo if fit_response else 1
+	response_factor_data = Pk_mm_dmo if fit_response else 1
 
 	hmcode_pofk = get_hmcode_pk(param_values, fit_params, field)
 	if field == 'matter-matter':
-		Pk_theory = hmcode_pofk[0, 0, 0]
+		Pk_theory = np.interp(k_data, k, hmcode_pofk[0, 0, 0]/response_factor_hmx)
 
 	elif field == 'matter-pressure':
-		Pk_theory = hmcode_pofk[0, 1, 0]
+		Pk_theory = np.interp(k_data, k, hmcode_pofk[0, 1, 0]/response_factor_hmx)
 
-	Pk_theory = np.interp(k_data, k, Pk_theory)
+
+	Pk_data = Pk_data/response_factor_data
+	variance = variance/response_factor_data**2
+
 	# Compute the chi^2
 	chi2 = np.sum((Pk_theory - Pk_data)**2/variance)
 
 	return -0.5*chi2
 
-def joint_log_likelihood(param_values, fit_params, k_data_mm, Pk_data_mm, variance_mm, k_data_mp, Pk_data_mp, variance_mp, fit_response=False):
-	for i in range(len(param_values)):
-		prior = priors[i]
-		if not (prior[0] <= param_values[i] <= prior[1]):
-			return -np.inf
+def joint_log_likelihood(param_values, fit_params, k_data_mm, Pk_data_mm, variance_mm, k_data_mp, Pk_data_mp, variance_mp, fit_response=False, return_sep=False):
+	if param_values is not None:	
+		for i in range(len(param_values)):
+			prior = priors[i]
+			if not (prior[0] <= param_values[i] <= prior[1]):
+				return -np.inf
 
 	hmcode_pofk = get_hmcode_pk(param_values, fit_params, 'matter-pressure')
 
@@ -77,7 +85,11 @@ def joint_log_likelihood(param_values, fit_params, k_data_mm, Pk_data_mm, varian
 	variance_mp = variance_mp/response_factor_data**2
 
 	# Compute the chi^2
-	chi2 = np.sum((Pk_theory_mm - Pk_data_mm)**2/variance_mm) + np.sum((Pk_theory_mp - Pk_data_mp)**2/variance_mp)
+	chi2_mm = np.sum((Pk_theory_mm - Pk_data_mm)**2/variance_mm) 
+	chi2_mp = np.sum((Pk_theory_mp - Pk_data_mp)**2/variance_mp)
+	chi2 = chi2_mm + chi2_mp 
+	
+	if return_sep: return np.array([-0.5*chi2_mm, -0.5*chi2_mp])
 
 	return -0.5*chi2
 
@@ -89,7 +101,6 @@ def plot_Pk(ax1, ax2, k_sim, Pk_sim, variance, Pk_bf, Pk_default, Pk_label):
 	ax1.plot(k_sim, Pk_default, c='limegreen', label='HMx: Default')
 	ax1.set_ylabel(Pk_label)
 	ax1.set_xscale('log')
-	ax1.legend()
 
 	ax2.semilogx(k_sim, Pk_default/Pk_sim, c='limegreen')
 	ax2.semilogx(k_sim, Pk_bf/Pk_sim, c='red', ls='--')
@@ -172,13 +183,14 @@ Nk = 2*np.pi * (k_mp/delta_k)**2
 variance_Pk_mp = Pk_mp**2/Nk
 
 fit_params_mm = ['eps_array', 'gamma_array', 'm0_array']
+latex_names_mm = ['$\epsilon_1$', '$\Gamma$', '$\log M_0$']
 priors_mm = [[-0.95, 3], [1.05, 3], [10, 17]]
 initial_parameters_mm = [0.2038, 1.33, 13.3]
 
 
 fit_params_mp = ['eps_array', 'gamma_array', 'm0_array', 'alpha_array', 'twhim_array', 'eps2_array']
 latex_names_mp = ['$\epsilon_1$', '$\Gamma$', '$\log M_0$', '$\\alpha$', '$T_{WHIM}$', '$\epsilon_2$']
-priors_mp = [[-0.95, 3], [1.05, 3], [10, 17], [0, 1.5], [6, 7.5], [-0.95, 3]]
+priors_mp = [[-0.95, 3], [1.05, 3], [10, 17], [0, 1.5], [4, 7.5], [-0.95, 3]]
 initial_parameters_mp = [0.2038, 1.33, 13.3, 0.84, 6.65, 0.2]
 
 if __name__=='__main__':
@@ -198,13 +210,15 @@ if __name__=='__main__':
 		# If no. of fit params is not specified use all        
 		if nparam is None: nparam = len(fit_params_mm)
 		fit_params = fit_params_mm[:nparam]
+		latex_names = latex_names_mp[:nparam]
 		initial_parameters = initial_parameters_mm[:nparam]
 		priors = priors_mm[:nparam]
 		k_sim, Pk_sim, variance = k_mm, Pk_mm, variance_Pk_mm
 		Pk_label = '$P_{mm}(k)$ [Mpc/$h]^3$'
 		save_dir = f'chains/Pk_mm_fit_nparam_{nparam}'
 		likelihood = log_likelihood
-		likelihood_args =  (fit_params, k_sim, Pk_sim, variance, field)
+		likelihood_args =  (fit_params, k_sim, Pk_sim, variance, field, fit_response)
+		niter = 3
 
 	elif field == 'matter-pressure':
 		if nparam is None: nparam = len(fit_params_mp)
@@ -216,7 +230,8 @@ if __name__=='__main__':
 		Pk_label = '$P_{mp}(k)$ [ev/cm$^3$] (Mpc/h)$^3$'
 		save_dir = f'chains/Pk_mp_fit_nparam_{nparam}'
 		likelihood = log_likelihood
-		likelihood_args =  (fit_params, k_sim, Pk_sim, variance, field)
+		likelihood_args =  (fit_params, k_sim, Pk_sim, variance, field, fit_response)
+		niter = 3
 
 	elif field == 'joint':
 		if nparam is None: nparam = len(fit_params_mp)
@@ -227,14 +242,15 @@ if __name__=='__main__':
 		Pk_label_mm = '$P_{mm}(k)$ [Mpc/$h]^3$'
 		Pk_label_mp = '$P_{mp}(k)$ [ev/cm$^3$] (Mpc/h)$^3$'
 		save_dir = f'chains/Pk_joint_fit_nparam_{nparam}'
-		if fit_response: save_dir = f'chains/Pk_joint_fit_nparam_{nparam}_fit_response'
 		likelihood = joint_log_likelihood
 		likelihood_args =  (fit_params, k_mm, Pk_mm, variance_Pk_mm, k_mp, Pk_mp, variance_Pk_mp, fit_response)
+		niter = 3
 
 	else:
 		print(f'Field {field} is not a valid option!')
 		sys.exit()
 
+	if fit_response: save_dir += '_fit_response'
 	if not os.path.exists(save_dir):        
 		try:
 		#Needed when using MPI and creating dir
@@ -265,7 +281,7 @@ if __name__=='__main__':
 			if not pool.is_master():
 				pool.wait()
 				sys.exit(0)
-			for i in range(3):
+			for i in range(niter):
 				print('Iteration: ', i+1)
 				print('\n')
 				sampler = emcee.EnsembleSampler(nwalkers, ndim, likelihood, args=likelihood_args, pool=pool)
@@ -314,7 +330,17 @@ if __name__=='__main__':
     
 	if field != 'joint':
 		Pk_bf = get_hmcode_pk(best_fit, fit_params, field)
+		chi2_bf = -2*log_likelihood(best_fit, *likelihood_args)
+		dof = len(k_sim)-len(fit_params)
+		chi2_bf_nu = chi2_bf/dof		
+
 		Pk_default = get_hmcode_pk(field=field)
+		Pk_HMx_dmo = np.interp(k_mm, k, hmcode_pofk_dmo)
+		chi2_default = -2*log_likelihood(None, *likelihood_args)
+		chi2_default_nu = chi2_default/dof
+
+		text = 'Best fit: $\chi^2$= ' + f'{chi2_bf:.0f}' + ', $\chi^2_\\nu$=' + f'{chi2_bf_nu:.0f}\n'
+		text += 'Default: $\chi^2$= ' + f'{chi2_default:.0f}' + ', $\chi^2_\\nu$=' + f'{chi2_default_nu:.0f}\n'
 		fig, ax = plt.subplots(2, 2, figsize=(15, 6), sharex=False, gridspec_kw={'height_ratios': [3, 1]})
 		if field == 'matter-matter':
 			Pk_bf = np.interp(k_sim, k, Pk_bf[0, 0, 0])
@@ -325,12 +351,32 @@ if __name__=='__main__':
 			Pk_bf = np.interp(k_sim, k, Pk_bf[0, 1, 0])
 			Pk_default = np.interp(k_sim, k, Pk_default[0, 1, 0])
 
-		plot_Pk(ax1, ax2, k_sim, Pk_sim, variance, Pk_bf, Pk_default, Pk_label)
 
+		plot_Pk(ax[0, 0], ax[1, 0], k_sim, Pk_sim, variance, Pk_bf, Pk_default, Pk_label)
+		ax[0, 0].set_yscale('log')
+
+		text_axes = ax[0, 1] if fit_response  else ax[0, 0]
+		text_axes.text(0.1, 0.2, text, transform=text_axes.transAxes)
+
+		plot_Pk(ax[0, 1], ax[1, 1], k_sim, Pk_sim/Pk_mm_dmo, variance/Pk_mm_dmo**2, 
+                Pk_bf/Pk_HMx_dmo, Pk_default/Pk_HMx_dmo, '$R_{mm}(k)$')
+		
 	else:
 		Pk_bf = get_hmcode_pk(best_fit, fit_params, 'matter-pressure')
+		chi2_bf = -2*joint_log_likelihood(best_fit, *likelihood_args, True)
+		dof = 2*len(k_mm)-len(fit_params)
+		chi2_bf_nu = chi2_bf/dof		
+
 		Pk_default = get_hmcode_pk(field='matter-pressure')
 		Pk_HMx_dmo = np.interp(k_mm, k, hmcode_pofk_dmo)
+		chi2_default = -2*joint_log_likelihood(None, *likelihood_args, True)
+		chi2_default_nu = chi2_default/dof
+
+		text_mm = 'Best fit: $\chi^2$= ' + f'{chi2_bf[0]:.0f}' + ', $\chi^2_\\nu$=' + f'{chi2_bf_nu[0]:.0f}\n'
+		text_mm += 'Default: $\chi^2$= ' + f'{chi2_default[0]:.0f}' + ', $\chi^2_\\nu$=' + f'{chi2_default_nu[0]:.0f}\n'
+
+		text_mp = 'Best fit: $\chi^2$= ' + f'{chi2_bf[1]:.0f}' + ', $\chi^2_\\nu$=' + f'{chi2_bf_nu[1]:.0f}\n'
+		text_mp += 'Default: $\chi^2$= ' + f'{chi2_default[1]:.0f}' + ', $\chi^2_\\nu$=' + f'{chi2_default_nu[1]:.0f}\n'
 
 		fig, ax = plt.subplots(4, 2, figsize=(15, 12), sharex=False, gridspec_kw={'height_ratios': [3, 1, 3, 1]})
 		Pk_bf_mm = np.interp(k_mm, k, Pk_bf[0, 0, 0])
@@ -342,15 +388,21 @@ if __name__=='__main__':
 		Pk_bf_mp = np.interp(k_mp, k, Pk_bf[0, 1, 0])
 		Pk_default_mp = np.interp(k_mp, k, Pk_default[0, 1, 0])
 		plot_Pk(ax[2, 0], ax[3, 0], k_mp, Pk_mp, variance_Pk_mp, Pk_bf_mp, Pk_default_mp, Pk_label_mp)
-		plot_Pk(ax[2, 1], ax[3, 1], k_mp, Pk_mp/Pk_mm_dmo, variance_Pk_mp/Pk_mm_dmo**2, 
-                Pk_bf_mp/Pk_HMx_dmo, Pk_default_mp/Pk_HMx_dmo, '$10^3R_{mp}(k)$')
+		plot_Pk(ax[2, 1], ax[3, 1], k_mp, 1e3*Pk_mp/Pk_mm_dmo, 1e6*variance_Pk_mp/Pk_mm_dmo**2, 
+                1e3*Pk_bf_mp/Pk_HMx_dmo, 1e3*Pk_default_mp/Pk_HMx_dmo, '$10^3R_{mp}(k)$')
 
-		if fit_response: 
-			ax[0, 1].set_title('Fit Quantity response R(k)')
-		else: 
-			ax[0, 0].set_title('Fit Quantity power spectrum P(k)')
 		ax[0, 0].set_yscale('log')
 		ax[2, 0].set_yscale('log')
 
+		text_axes = [ax[0, 1], ax[2, 1]] if fit_response  else [ax[0, 0], ax[2, 0]]
+
+		text_axes[0].text(0.1, 0.2, text_mm, transform=text_axes[0].transAxes)
+		text_axes[1].text(0.1, 0.8, text_mp, transform=text_axes[1].transAxes)
+
+	ax[0, 0].legend()
+	if fit_response: 
+		ax[0, 1].set_title('Fit Quantity response R(k)')
+	else: 
+		ax[0, 0].set_title('Fit Quantity power spectrum P(k)')
 	plt.savefig(f'{save_dir}/HMx_bestfit.pdf', dpi=300, bbox_inches='tight')
 
