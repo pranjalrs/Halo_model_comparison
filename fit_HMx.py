@@ -152,8 +152,8 @@ hmcode_cosmology_dmo = pyhmcode.halo_profile_utils.ccl2hmcode_cosmo(
 						log10_T_heat=0.)
 
 hmcode_model = pyhmcode.Halomodel(pyhmcode.HMx2020_matter_pressure_w_temp_scaling)
-hmcode_pofk_dmo = pyhmcode.calculate_nonlinear_power_spectrum(cosmology=hmcode_cosmology_dmo,
-                            halomodel=hmcode_model, fields=[pyhmcode.field_matter])[0, 0, 0]
+hmcode_pofk_dmo = pyhmcode.calculate_nonlinear_power_spectrum(cosmology=hmcode_cosmology,
+                            halomodel=hmcode_model, fields=[pyhmcode.field_dmonly])[0, 0, 0]
 #----------------------------------- 2. Load Data -----------------------------------#
 # Load Pk for matter-matter
 Pk_mm, box_size = np.loadtxt('../magneticum-data/data/Pylians/Pk_matter/Box2/Pk_hr_bao_CIC_R1024.txt'), 352
@@ -190,7 +190,7 @@ initial_parameters_mm = [0.2038, 1.33, 13.3]
 
 fit_params_mp = ['eps_array', 'gamma_array', 'm0_array', 'alpha_array', 'twhim_array', 'eps2_array']
 latex_names_mp = ['$\epsilon_1$', '$\Gamma$', '$\log M_0$', '$\\alpha$', '$T_{WHIM}$', '$\epsilon_2$']
-priors_mp = [[-0.95, 3], [1.05, 3], [10, 17], [0, 1.5], [4, 7.5], [-0.95, 3]]
+priors_mp = [[-0.95, 3], [1.05, 3], [10, 17], [0, 1.5], [6, 7.5], [-0.95, 3]]
 initial_parameters_mp = [0.2038, 1.33, 13.3, 0.84, 6.65, 0.2]
 
 if __name__=='__main__':
@@ -231,7 +231,7 @@ if __name__=='__main__':
 		save_dir = f'chains/Pk_mp_fit_nparam_{nparam}'
 		likelihood = log_likelihood
 		likelihood_args =  (fit_params, k_sim, Pk_sim, variance, field, fit_response)
-		niter = 3
+		niter = 5
 
 	elif field == 'joint':
 		if nparam is None: nparam = len(fit_params_mp)
@@ -285,7 +285,7 @@ if __name__=='__main__':
 				print('Iteration: ', i+1)
 				print('\n')
 				sampler = emcee.EnsembleSampler(nwalkers, ndim, likelihood, args=likelihood_args, pool=pool)
-				sampler.run_mcmc(initial, 500, progress=True)
+				sampler.run_mcmc(initial, 300, progress=True)
 				walkers.append(sampler.get_chain(flat=False))
 				flat_chain = sampler.get_chain(flat=True)
 				blobs = sampler.get_blobs(flat=True)
