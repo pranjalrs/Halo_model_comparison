@@ -3,11 +3,22 @@ import scipy.integrate
 
 import astropy.units as u
 import astropy.cosmology.units as cu
+import astropy.constants as const
 
 # Convention
 # r: physical radial distance
 # x: distance in r/Rvir
 # y: distance in r/Rs where Rs = Rvir/c
+
+def get_Pe_profile(M, z, params, x_bins=None):
+    c_M = get_concentration(M, z, params)
+    rvirial = get_rvirial(M, z, params)
+
+    rho_bnd = get_rho_gas_profile(M, z, params, x_bins)[0]
+    Temp_g = get_Temp_g(M, z, params, x_bins)
+    P_e = rho_bnd * const.k_B*Temp_g/const.m_p
+    
+    return P_e, x_bins
 
 
 def get_rho_dm_profile(M, z, params, x_bins=None):
@@ -40,6 +51,30 @@ def get_rho_gas_profile(M, z, params, x_bins=None):
     norm = get_norm(_get_rho_bnd, r_virial=rvirial, c_M=c_M, params=params)
 
     return rho_bnd*get_f_bnd(M, params)*M / norm, x_bins
+
+
+def get_Temp_g(M, z, params, x_bins):
+    '''Gas temperature
+    Eq. 38
+    '''
+    alpha = params['alpha']
+    f_H = 0.76
+    mu_p = 4/(3 + 5*f_H)
+    mu_e = 2/(1 + f_H)
+    
+    r_virial = get_rvirial(M, z, params)
+    c_M = get_concentration(M, z, params)
+    #     Tv = G * m_p * mu_p /(a * rvirial) /(3/2 * kB) * M
+    T_virial = alpha*(const.G*const.m_p*mu_p*(1+z)/r_virial/(3/2*const.k_B)*M).to(u.K)
+    
+
+    r_s = r_virial/c_M
+    r_bins = x_bins * r_virial
+    y = (r_bins/r_s).decompose()
+
+    f_r = np.log(1 + y)/y
+    return T_virial * (f_r)/mu_e
+
 
 
 
