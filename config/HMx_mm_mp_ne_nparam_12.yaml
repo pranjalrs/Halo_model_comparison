@@ -1,0 +1,77 @@
+fields:
+	['m-m', 'm-p', 'ne-ne']
+
+fit_response: True
+
+mcmc:
+	nwalkers: 100
+	nsteps: 1000
+	burnin: 0.8  # Fraction of total steps
+	niter: 3  # Number of MCMC restarts
+	parallel: multiprocessing
+
+
+	# Priors for the
+params:
+	eps1:
+		prior: [-0.95, 3]
+		initial_value: 0.2038
+		latex_name: "$\epsilon_1$"
+
+	eps2:
+		prior: [-0.95, 3]
+		initial_value: 0.2
+		latex_name: "$\epsilon_2$"
+
+	# Gas parameters
+	logM0:
+		prior: [10, 17]
+		initial_value: 13
+		latex_name: "$M_0$"
+
+	beta:
+		prior: [0.1, 1.5]
+		initial_value: 0.5
+		latex_name: "$\\beta$"
+
+	Gamma:
+		prior: [1.05, 3]
+		initial_value: 1.33
+		latex_name: "$\Gamma$"
+
+	eta_b:
+		prior: [0.1, 1.5]
+		initial_value: 0.5
+		latex_name: "$\eta_b$"
+
+	# Pressure parameters
+	alpha:
+		prior: [0, 1.5]
+		initial_value: 0.84
+		latex_name: "$\\alpha$"
+
+	logT_w:
+		prior: [6, 7.5]
+		initial_value: 6.65
+		latex_name: "$\log T_\mathrm{WHIM}$"
+
+	# Star parameters
+	A_star:
+		prior: [0.02, 0.08]
+		initial_value: 0.5
+		latex_name: "$A_*$"
+
+	logM_star:
+		prior: [10, 15]
+		initial_value: 13
+		latex_name: "$\log M_*$"
+
+	sigma_star:
+		prior: [0.6, 1.8]
+		initial_value: 0.5
+		latex_name: "$\sigma_*$"
+
+	eta:
+		prior: [-0.5, -0.1]
+		initial_value: 0.5
+		latex_name: "$\eta$"
