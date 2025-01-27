@@ -28,7 +28,7 @@ bpar_A20 = dict(alpha_g = 2, epsilon_h = 0.015, M1_0 = 2.2e11/h, alpha_sat = 1,
 				mean_molecular_weight = 0.59)
 
 def init_bfg_model(halo_model, cosmo, a):
-	k = np.logspace(-2, 1.5, 100)
+	k = np.logspace(-2, 1., 100)
 	a = a
 	cosmo = cosmo
 
@@ -43,6 +43,13 @@ def init_bfg_model(halo_model, cosmo, a):
 	elif halo_model == 'Mead20':
 		mdef = ccl.halos.MassDef(Delta="vir", rho_type="matter")
 		DMO = bfg.Profiles.Mead20.DarkMatter(mass_def = mdef) / rho
+
+
+	elif halo_model == 'Schneider19':
+		mdef = ccl.halos.MassDef(Delta="200", rho_type="critical")
+		T   = bfg.Profiles.misc.Truncation(epsilon = 100)
+		DMO = bfg.Profiles.Schneider19.DarkMatter(**bpar_S19, mdef=mdef, r_min_int = 1e-3, r_max_int = 1e2, r_steps = 50)*T/rho
+
 
 	#We will use the built-in, CCL halo model calculation tools.
 	hmf = ccl.halos.MassFuncSheth99(mass_def=mdef, mass_def_strict = False, use_delta_c_fit = True)
@@ -74,16 +81,16 @@ def init_bfg_model(halo_model, cosmo, a):
 	return bfg_meta_dict
 
 
-def get_bfg_Pk(param_values, fit_params, field):
-	par = get_param_dict(param_values, fit_params)
+def get_bfg_Pk(param_values=None, fit_params=None, field=None, param_dict=None):
+	par = get_param_dict(param_values, fit_params, param_dict)
 	h = bfg_dict['cosmo'].cosmo.params.h
 
 	if bfg_dict['halo_model'] == 'Mead20':
 		#Define profiles. Normalize to convert density --> overdensity
 		DMB = getattr(bfg.Profiles, bfg_dict['halo_model']).DarkMatterBaryon(**par, mass_def = bfg_dict['mdef']) / bfg_dict['rho']
 		PRS = getattr(bfg.Profiles, bfg_dict['halo_model']).Pressure(**par, mass_def=bfg_dict['mdef'])
-		Gas = getattr(bfg.Profiles, bfg_dict['halo_model']).Gas(**par, mass_def=bfg_dict['mdef'])
-		GasDensity = bfg.Profiles.GasNumberDensity(gas = Gas, mean_molecular_weight = 1.15, mass_def=bfg_dict['mdef']) #simple constant rescaling of gas density --> number density in cgs
+		GAS = getattr(bfg.Profiles, bfg_dict['halo_model']).Gas(**par, mass_def=bfg_dict['mdef'])
+		GasDensity = bfg.Profiles.GasNumberDensity(gas = GAS, mean_molecular_weight = 1.15, mass_def=bfg_dict['mdef']) #simple constant rescaling of gas density --> number density in cgs
 		ElectronDensity = GasDensity
 
 	elif bfg_dict['halo_model'] == 'Arico20':
@@ -97,11 +104,28 @@ def get_bfg_Pk(param_values, fit_params, field):
 
 		#In practice, we should be using the ModifiedDarkMatter in the CLM profile.
 		#But we could use the standard NFW profile to speed things up a bit.
-		CLM = bfg.Profiles.Arico20.CollisionlessMatter(**par, darkmatter = DMO, max_iter = 2, reltol = 5e-2, r_steps = 100)
+		CLM = bfg.Profiles.Arico20.CollisionlessMatter(**par, darkmatter = DMO, max_iter = 4, reltol = 5e-2, r_steps = 100)
 		DMB = bfg.Profiles.Arico20.DarkMatterBaryon(gas = GAS, stars = STR, collisionlessmatter = CLM)/ bfg_dict['rho']
 		PRS = bfg.Profiles.Arico20.Pressure(**par, gas = BND + EJG + RAG)
 
+	elif bfg_dict['halo_model'] == 'Schneider19':
+		#For Schneider19, the DarkMatterBaryon profile includes the TwoHalo term.
+		#So let's make sure to remove that. The ``DarkMatterBaryon'' class is
+		#still good one to use since it makes sure Gas + star + DM is normalized
+		#to match the total mass from the DMO case
+		T   = bfg.Profiles.misc.Truncation(epsilon = 100)
+		DMO = bfg.Profiles.Schneider19.DarkMatter(**par, r_min_int = 1e-3, r_max_int = 1e2, r_steps = 50)
+		GAS = bfg.Profiles.Schneider19.Gas(**par, r_min_int = 1e-3, r_max_int = 1e2, r_steps = 50)
+		STR = bfg.Profiles.Schneider19.Stars(**par, r_min_int = 1e-3, r_max_int = 1e2, r_steps = 50)
+		CLM = bfg.Profiles.Schneider19.CollisionlessMatter(**par, max_iter = 2, reltol = 5e-2, r_steps = 100)
+		DMB = bfg.Profiles.Schneider19.DarkMatterBaryon(**par,
+														gas = GAS, stars = STR,
+														collisionlessmatter = CLM, darkmatter = DMO,
+														twohalo = bfg.Profiles.misc.Zeros(),
+														r_steps = 100)
+		PRS = bfg.Profiles.Pressure(gas = GAS, darkmatterbaryon = DMB, **par, r_min_int = 1e-4, r_max_int = 1e2, r_steps = 50)
 
+		DMB = DMB/ bfg_dict['rho']*T
 
 
 	#Upgrade precision of all profiles.
@@ -118,24 +142,36 @@ def get_bfg_Pk(param_values, fit_params, field):
 	elif field == 'ne-ne':
 		Pk = ccl.halos.pk_2pt.halomod_power_spectrum(bfg_dict['cosmo'], bfg_dict['HMC'], bfg_dict['k'], bfg_dict['a'], ElectronDensity)*h**3
 
+	elif field == 'gas':
+		Pk = ccl.halos.pk_2pt.halomod_power_spectrum(bfg_dict['cosmo'], bfg_dict['HMC'], bfg_dict['k'], bfg_dict['a'], GAS)*h**3
+
 	return Pk, bfg_dict['k']
 
-def get_param_dict(param_values, param_names):
+def get_param_dict(param_values, param_names, param_dict):
 	if bfg_dict['halo_model'] == 'Arico20':
 		par = bpar_A20.copy()
 
 	elif bfg_dict['halo_model'] == 'Mead20':
 		par = bfg.Profiles.Mead20.Params_TAGN_7p8_MPr.copy()
 
+	elif bfg_dict['halo_model'] == 'Schneider19':
+		par = bpar_S19.copy()
 
-	for key, val in zip(param_names, param_values):
-		if key.startswith('log'):
-			if key.split('log')[1] not in par.keys(): raise ValueError(f'Invalid parameter {key}!')
-			par[key.split('log')[1]] = 10**val
+	assert (param_values is not None and param_names is not None) or param_dict is not None, 'Please provide either param_values and param_names or param_dict'
 
-		else:
-			if key not in par.keys(): raise ValueError(f'Invalid parameter {key}!')
-			par[key] = val
+	if param_dict is not None:
+		par.update(param_dict)
+
+	else:
+
+		for key, val in zip(np.atleast_1d(param_names), np.atleast_1d(param_values)):
+			if key.startswith('log'):
+				if key.split('log')[1] not in par.keys(): raise ValueError(f'Invalid parameter {key}!')
+				par[key.split('log')[1]] = 10**val
+
+			else:
+				if key not in par.keys(): raise ValueError(f'Invalid parameter {key}!')
+				par[key] = val
 
 
 	return par
@@ -280,8 +316,8 @@ def save_best_fit(flat_chain, Pk_data, config, bfg_dict):
 		variance = Pk_data[field]['variance']/response_denom_data**2
 
 		# Pk_best fit
-		#Pk_theory, k = get_bfg_Pk(bf_params, config['fit_params'], field)
-		Pk_theory, k = get_bfg_Pk([], [], field)
+		Pk_theory, k = get_bfg_Pk(bf_params, config['fit_params'], field)
+		# Pk_theory, k = get_bfg_Pk([], [], field)
 		Pk_theory_interp = np.interp(k_sim, k/h, Pk_theory/response_denom_theory)
 
 		# Pk_theory2, k = get_bfg_Pk([], [], field)
