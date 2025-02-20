@@ -1,0 +1,120 @@
+# Master file parameters varied (12): eps1, eps2, logM0, beta, Gamma, eta_b, alpha, logT_w, A_star, logM_star, sigma_star, eta
+fields:
+  - "m-m"
+  - "m-p"
+  - "ne-ne"
+
+halo_model: Arico20
+fit_response: True
+
+mcmc:
+  nwalkers: 40
+  nsteps: 1
+  burnin: 0.8  # Fraction of total steps
+  niter: 3  # Number of MCMC restarts
+  parallel: load_samples #multiprocessing
+
+
+params:
+  # Gas parameters
+  theta_inn:
+    prior: [0., 4.0]
+    initial_value: 0.2
+    latex_name: $\theta_\mathrm{inn}$
+    ls: '-'
+
+  theta_out:
+    prior: [0.3, 4.0]
+    initial_value: 0.5
+    latex_name: $\theta_\mathrm{out}$
+    ls: '-'
+
+  logM_inn:
+    prior: [10, 16]
+    initial_value: 13
+    latex_name: $\log M_\mathrm{inn}$
+    ls: '-'
+
+  mu:
+    prior: [0.1, 1]
+    initial_value: 0.31
+    latex_name: $\mu$
+    ls: '-'
+
+  logM_c:
+    prior: [10, 16]
+    initial_value: 13
+    latex_name: $\log M_\mathrm{c}$
+    ls: '-'
+
+
+  beta:
+    prior: [0.1, 2]
+    initial_value: 0.35
+    latex_name: $\beta$
+    ls: '--'
+
+  eta:
+    prior: [0.2, 5]
+    initial_value: 0.5
+    latex_name: $\eta$
+    ls: '--'
+
+  logM_r:
+    prior: [12, 16]
+    initial_value: 13.5
+    latex_name: $\log M_\mathrm{r}$
+    ls: '--'
+
+  beta_r:
+    prior: [0.5, 5]
+    initial_value: 2
+    latex_name: $\beta_\mathrm{r}$
+    ls: '--'
+
+
+  theta_rg:
+    prior: [0.1, 1]
+    initial_value: 0.3
+    latex_name: $\theta_\mathrm{rg}$
+    ls: '--'
+
+
+  sigma_rg:
+    prior: [1.e-2, 5.e-1]
+    initial_value: 0.1
+    latex_name: $\sigma_\mathrm{rg}$
+    ls: '--'
+
+
+  # Star parameters
+  epsilon_h:
+    prior: [0.01, 0.08]
+    initial_value: 0.015
+    latex_name: $\epsilon_\mathrm{h}$
+    ls: ':'
+
+  logM1_0:
+    prior: [9, 16]
+    initial_value: 12
+    latex_name: $\log M_{1,0}$
+    ls: ':'
+
+  alpha_g:
+    prior: [0, 4]
+    initial_value: 2
+    latex_name: $\alpha_\mathrm{g}$
+    ls: ':'
+
+  alpha_sat:
+    prior: [0, 4]
+    initial_value: 1
+    latex_name: $\alpha_\mathrm{sat}$
+    ls: ':'
+
+  # Pressure parameters
+  A_nt:
+    prior: [0, 1.5]
+    initial_value: 0.495
+    latex_name: $A_\mathrm{nt}$
+    ls: '-.'
