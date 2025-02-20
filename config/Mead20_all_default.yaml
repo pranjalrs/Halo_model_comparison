@@ -1,0 +1,81 @@
+# Master file
+# Parameters varied (12): eps1, eps2, logM0, beta, Gamma, eta_b, alpha, logT_w, A_star, logM_star, sigma_star, eta
+fields:
+  - "m-m"
+  - "m-p"
+  - "ne-ne"
+
+halo_model: Mead20
+fit_response: True
+
+mcmc:
+  nwalkers: 40
+  nsteps: 1 #000
+  burnin: 0.8  # Fraction of total steps
+  niter: 3  # Number of MCMC restarts
+  parallel: load_samples #multiprocessing
+
+
+params:
+  eps1:
+    prior: [-0.95, 3]
+    initial_value: 0.2038
+    latex_name: $\epsilon_1$
+
+  eps2:
+    prior: [-0.95, 3]
+    initial_value: 0.
+    latex_name: $\epsilon_2$
+
+  # Gas parameters
+  logM_0:
+    prior: [10, 16]
+    initial_value: 13.59
+    latex_name: $\log M_0$
+
+  beta:
+    prior: [0.1, 1.5]
+    initial_value: 0.6
+    latex_name: $\beta$
+
+  Gamma:
+    prior: [1.05, 3]
+    initial_value: 1.17
+    latex_name: $\Gamma$
+
+  eta_b:
+    prior: [0.1, 1.5]
+    initial_value: 0.5
+    latex_name: $\eta_b$
+
+  # Pressure parameters
+  alpha:
+    prior: [0, 1.5]
+    initial_value: 0.847
+    latex_name: $\alpha$
+
+  logT_w:
+    prior: [6, 7.5]
+    initial_value: 6.65
+    latex_name: $\log T_\mathrm{WHIM}$
+
+  # Star parameters
+  A_star:
+    prior: [0.02, 0.08]
+    initial_value: 0.033
+    latex_name: $A_*$
+
+  logM_star:
+    prior: [10, 15]
+    initial_value: 12.45
+    latex_name: $\log M_*$
+
+  sigma_star:
+    prior: [0.6, 1.8]
+    initial_value: 1.2
+    latex_name: $\sigma_*$
+
+  eta:
+    prior: [-0.5, -0.1]
+    initial_value: -0.3
+    latex_name: $\eta$
