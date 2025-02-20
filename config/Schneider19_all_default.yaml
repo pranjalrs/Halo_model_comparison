@@ -1,0 +1,119 @@
+fields:
+  - "m-m"
+
+halo_model: Schneider19
+fit_response: True
+
+mcmc:
+  nwalkers: 15
+  nsteps: 1000
+  burnin: 0.8  # Fraction of total steps
+  niter: 3  # Number of MCMC restarts
+  parallel: MPI #multiprocessing #MPI #multiprocessing
+
+
+params:
+  # Gas parameters
+  gamma:
+   prior: [0.2, 6]
+   initial_value: 2
+   latex_name: $\gamma$
+
+  delta:
+   prior: [0.2, 6]
+   initial_value: 2
+   latex_name: $\delta$
+
+  logM_c:
+    prior: [10, 16]
+    initial_value: 14
+    latex_name: $\log M_{\mathrm{c},0}$
+
+  mu_beta:
+    prior: [0., 5]
+    initial_value: 0.2
+    latex_name: $\mu_\beta$
+
+  theta_co:
+    prior: [0., 8]
+    initial_value: 0.1
+    latex_name: $\log M_{\mathrm{co},0}$
+
+  logM_theta_co:
+    prior: [10, 16]
+    initial_value: 13
+    latex_name: $\log M_mathrm{co}$
+
+  mu_theta_co:
+    prior: [-5., 5.]
+    initial_value: 0.
+    latex_name: $\mu_\mathrm{co}$
+
+  zeta_theta_co:
+    prior: [-5., 5.]
+    initial_value: 0.
+    latex_name: $\zeta_\mathrm{co}$
+
+
+  theta_ej:
+    prior: [1, 8]
+    initial_value: 4
+    latex_name: $\theta_{\mathrm{ej},0}$
+
+  logM_theta_ej:
+    prior: [10, 16]
+    initial_value: 13
+    latex_name: $\log M_\mathrm{ej}$
+
+  mu_theta_ej:
+    prior: [-5., 5.]
+    initial_value: 0.
+    latex_name: $\mu_\mathrm{ej}$
+
+  zeta_theta_ej:
+    prior: [-5., 5.]
+    initial_value: 0.
+    latex_name: $\zeta_\mathrm{ej}$
+
+  # Stellar parameters
+  A:
+    prior: [0., 1]
+    initial_value: 0.045
+    latex_name: $A$
+
+  logM1:
+    prior: [10, 16]
+    initial_value: 11.5
+    latex_name: $\log M_{1}$
+
+  tau:
+    prior: [-2, 2]
+    initial_value: -1.5
+    latex_name: $\tau$
+
+  eta:
+    prior: [-2, 2]
+    initial_value: 0.3
+    latex_name: $\eta$
+
+  tau_delta:
+    prior: [-2, 2]
+    initial_value: 0.
+    latex_name: $\tau_{\delta}$
+
+  eta_delta:
+    prior: [-2, 2]
+    initial_value: 0.3
+    latex_name: $\eta_{\delta}$
+
+
+  # Pressure
+  alpha_nt:
+    prior: [0.01, 0.5]
+    initial_value: 0.18
+    latex_name: $\alpha_\mathrm{nt}$
+
+  gamma_nt:
+    prior: [0., 2]
+    initial_value: 0.8
+    latex_name: $\gamma_\mathrm{nt}$
