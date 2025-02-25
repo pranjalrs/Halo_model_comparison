@@ -11,6 +11,8 @@ import astropy.constants as const
 import pyccl as ccl
 import BaryonForge as bfg
 
+from utils import get_param_dict
+
 Pk_data = {}
 config = {}
 bfg_dict = {}
@@ -34,23 +36,6 @@ m_p     = 1.67262e-27 / Msun_to_Kg
 c       = 2.99792458e8 / Mpc_to_m
 
 
-bpar_S19 = dict(gamma = 2, delta = 3,
-				M_c = 1e14, mu_beta = 0.2,
-				theta_co = 0.1, M_theta_co = 13, mu_theta_co = 0., zeta_theta_co = 0.0,
-				theta_ej = 4, M_theta_ej = 13, mu_theta_ej = 0., zeta_theta_ej = 0.0,
-				eta = 0.3, eta_delta = 0.3, tau = -1.5, tau_delta = 0, #Must use tau here since we go down to low mass
-				A = 0.09/2, M1 = 10**(11.5), epsilon_h = 0.015,
-				alpha_nt = 0.18, gamma_nt = 0.8,
-				a = 0.3, n = 2, epsilon = 4, p = 0.3, q = 0.707)
-
-bpar_A20 = dict(alpha_g = 2, epsilon_h = 0.015, M1_0 = 1e12,
-				alpha_fsat = 1, M1_fsat = 1, delta_fsat = 1, gamma_fsat = 1, eps_fsat = 1,
-				M_c = 1e13, eta = 0.5, mu = 0.31, beta = 0.35, epsilon_hydro = np.sqrt(5),
-				M_inn = 1e13, M_r = 10**(13.5), beta_r = 2, theta_inn = 0.2, theta_out = 2,
-				theta_rg = 0.3, sigma_rg = 0.1, a = 0.3, n = 2, p = 0.3, q = 0.707,
-				A_nt = 0.495, alpha_nt = 0.08,
-				mean_molecular_weight = 0.59)
-
 def init_bfg_model(halo_model, cosmo, a):
 	k = np.logspace(-2, 1., 100)
 	a = a
@@ -63,22 +48,24 @@ def init_bfg_model(halo_model, cosmo, a):
 	if halo_model == 'Arico20':
 		mdef = ccl.halos.MassDef(Delta="200", rho_type="critical")
 		DMO = bfg.Profiles.Arico20.DarkMatter() / rho
-
+		concentration = ccl.halos.concentration.ConcentrationDiemer15(mass_def = mdef)
 
 	elif halo_model == 'Mead20':
 		mdef = ccl.halos.MassDef(Delta="vir", rho_type="matter")
 		DMO = bfg.Profiles.Mead20.DarkMatter(mass_def = mdef) / rho
+		concentration = ccl.halos.concentration.ConcentrationDuffy08(mass_def = mdef)
 
 
 	elif halo_model == 'Schneider19':
 		## TO DO: Fix computation for Schneider19
 		mdef = ccl.halos.MassDef(Delta="200", rho_type="critical")
+		concentration = ccl.halos.concentration.ConcentrationDiemer15(mass_def = mdef)
 		T   = bfg.Profiles.misc.Truncation(epsilon = 100)
-		DMO = bfg.Profiles.Schneider19.DarkMatter(**bpar_S19, r_min_int = 1e-3, r_max_int = 1e2, r_steps = 500)*T/rho
+		DMO = bfg.Profiles.Schneider19.DarkMatter(epsilon = 4, r_min_int = 1e-3, r_max_int = 1e2, r_steps = 500)*T/rho
 		M_2_Mtot = bfg.Profiles.misc.Mdelta_to_Mtot(DMO, r_min = 1e-6, r_max = 1e2, N_int = 100)
 		HMC_flex = bfg.utils.FlexibleHMCalculator(mass_function = 'Tinker08', halo_bias = 'Tinker10', halo_m_to_mtot = M_2_Mtot,
 										  mass_def = ccl.halos.massdef.MassDef200c,
-										  log10M_min = Mmin, log10M_max = Mmax, nM = 100)
+										  log10M_min = np.log10(Mmin), log10M_max = np.log10(Mmax), nM = 100)
 
 
 	#We will use the built-in, CCL halo model calculation tools.
@@ -87,6 +74,8 @@ def init_bfg_model(halo_model, cosmo, a):
 	HMC  = ccl.halos.halo_model.HMCalculator(mass_function = hmf, halo_bias = hbf,
 										mass_def = mdef,
 										log10M_min = np.log10(Mmin), log10M_max = np.log10(Mmax), nM = 100)
+
+	HOD_profile =  ccl.halos.profiles.hod.HaloProfileHOD(mass_def=mdef, concentration=concentration)
 
 	if halo_model == 'Schneider19': HMC == HMC_flex
 
@@ -106,6 +95,7 @@ def init_bfg_model(halo_model, cosmo, a):
 					 'fft_precision': fft_precision,
 					 'mdef': mdef,
 					 'HMC': HMC,
+					 'HOD_profile': HOD_profile,
 					 'P_mm_dmo': P_mm_dmo,
 					 'cgs_to_eV_cm3__factor': cgs_to_eV_cm3__factor}
 
@@ -113,7 +103,7 @@ def init_bfg_model(halo_model, cosmo, a):
 
 
 def get_bfg_Pk(param_values=None, fit_params=None, field=None, param_dict=None):
-	par = get_param_dict(param_values, fit_params, param_dict)
+	par = get_param_dict(param_values, fit_params, param_dict, halo_model = bfg_dict['halo_model'])
 	cosmo = bfg_dict['cosmo']
 	h = cosmo.cosmo.params.h
 	f_baryon = cosmo.cosmo.params.Omega_b/cosmo.cosmo.params.Omega_m
@@ -137,7 +127,7 @@ def get_bfg_Pk(param_values=None, fit_params=None, field=None, param_dict=None):
 		mean_mass = bfg_dict['HMC'].integrate_over_massfunc(lambda mass: mass, bfg_dict['cosmo'], a=1)
 		mean_fgas = mean_fgas/mean_mass
 
-		mean_electron_density = bfg_dict['rho']/(m_p*(Mpc_to_m * m_to_cm)**3)/1.15 * mean_fgas * f_baryon
+		mean_electron_density = bfg_dict['rho']/(m_p*(Mpc_to_m * m_to_cm)**3)/1.15 * mean_fgas
 		delta_ElectronDensity = ElectronDensity / mean_electron_density
 
 		for p in [DMB, PRS, GAS, ElectronDensity, ElectronDensity_sq, delta_ElectronDensity]:
@@ -171,7 +161,7 @@ def get_bfg_Pk(param_values=None, fit_params=None, field=None, param_dict=None):
 		mean_mass = bfg_dict['HMC'].integrate_over_massfunc(lambda mass: mass, bfg_dict['cosmo'], a=1)
 		mean_fgas = mean_fgas/mean_mass
 
-		mean_electron_density = bfg_dict['rho']/(m_p*(Mpc_to_m * m_to_cm)**3)/1.15 * mean_fgas * f_baryon
+		mean_electron_density = bfg_dict['rho']/(m_p*(Mpc_to_m * m_to_cm)**3)/1.15 * mean_fgas
 		delta_ElectronDensity = ElectronDensity / mean_electron_density
 		#Upgrade precision of all profiles.
 		for p in [DMB, DMO, PRS, ElectronDensity, ElectronDensity_sq, delta_ElectronDensity]:
@@ -196,6 +186,8 @@ def get_bfg_Pk(param_values=None, fit_params=None, field=None, param_dict=None):
 												r_steps = 500)
 
 		PRS = bfg.Profiles.Pressure(gas = GAS, darkmatterbaryon = DMB, **par, r_min_int = 1e-4, r_max_int = 1e2, r_steps = 500)
+		NonThermalPRS = bfg.Profiles.NonThermalFrac(**par)
+		PRS = PRS * (1 - NonThermalPRS)
 
 		#Now convert density --> overdensity
 		#We do this later because PRS is defined with density
@@ -207,7 +199,7 @@ def get_bfg_Pk(param_values=None, fit_params=None, field=None, param_dict=None):
 		DMO = DMO * T
 
 		def get_fgas(mass):
-			f_star = 2 * par['A'] * ((mass/par['M1'])**bpar_S19['tau'] + (mass/par['M1'])**par['eta'])**-1
+			f_star = 2 * par['A'] * ((mass/par['M1'])**par['tau'] + (mass/par['M1'])**par['eta'])**-1
 			f_gas = f_baryon - f_star
 
 			return f_gas * mass
@@ -217,7 +209,7 @@ def get_bfg_Pk(param_values=None, fit_params=None, field=None, param_dict=None):
 		mean_mass = bfg_dict['HMC'].integrate_over_massfunc(lambda mass: mass, bfg_dict['cosmo'], a=1)
 		mean_fgas = mean_fgas / mean_mass
 
-		mean_electron_density = bfg_dict['rho']/(m_p*(Mpc_to_m * m_to_cm)**3)/1.15 * mean_fgas * f_baryon
+		mean_electron_density = bfg_dict['rho']/(m_p*(Mpc_to_m * m_to_cm)**3)/1.15 * mean_fgas
 		delta_ElectronDensity = ElectronDensity / mean_electron_density
 
 		# Upgrade precision of all profiles.
@@ -235,48 +227,16 @@ def get_bfg_Pk(param_values=None, fit_params=None, field=None, param_dict=None):
 	elif field == 'ne-ne':
 		Pk = ccl.halos.pk_2pt.halomod_power_spectrum(bfg_dict['cosmo'], bfg_dict['HMC'], bfg_dict['k'], bfg_dict['a'], ElectronDensity)*h**3
 
+	elif field == 'g-ne':
+		Pk = ccl.halos.pk_2pt.halomod_power_spectrum(bfg_dict['cosmo'], bfg_dict['HMC'], bfg_dict['k'], bfg_dict['a'],
+											   ElectronDensity, prof2=bfg_dict['HOD_profile'])*h**3
+
 	elif field == 'frb':
 		Pk = ccl.halos.pk_2pt.halomod_power_spectrum(bfg_dict['cosmo'], bfg_dict['HMC'], bfg_dict['k'], bfg_dict['a'], delta_ElectronDensity)*h**3
 
 	elif field == 'xray':
 		Pk = ccl.halos.pk_2pt.halomod_power_spectrum(bfg_dict['cosmo'], bfg_dict['HMC'], bfg_dict['k'], bfg_dict['a'], ElectronDensity_sq)*h**3
 	return Pk, bfg_dict['k']
-
-def get_param_dict(param_values, param_names, param_dict):
-	if bfg_dict['halo_model'] == 'Arico20':
-		par = bpar_A20.copy()
-
-	elif bfg_dict['halo_model'] == 'Mead20':
-		par = bfg.Profiles.Mead20.Params_TAGN_7p8_MPr.copy()
-
-	elif bfg_dict['halo_model'] == 'Schneider19':
-		par = bpar_S19.copy()
-
-	assert (param_values is not None and param_names is not None) or param_dict is not None, 'Please provide either param_values and param_names or param_dict'
-
-	if param_dict is not None:
-		par.update(param_dict)
-
-	else:
-
-		for key, val in zip(np.atleast_1d(param_names), np.atleast_1d(param_values)):
-			if key == 'alpha_sat':
-				par['M1_fsat'] = val
-				par['eps_fsat'] = val
-				par['alpha_fsat'] = val
-				par['delta_fsat'] = val
-				par['gamma_fsat'] = val
-
-			elif key.startswith('log'):
-				if key.split('log')[1] not in par.keys(): raise ValueError(f'Invalid parameter {key}!')
-				par[key.split('log')[1]] = 10**val
-
-			else:
-				if key not in par.keys(): raise ValueError(f'Invalid parameter {key}!')
-				par[key] = val
-
-
-	return par
 
 
 
