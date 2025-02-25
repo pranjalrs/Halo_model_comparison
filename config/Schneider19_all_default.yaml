@@ -11,6 +11,8 @@ mcmc:
   niter: 3  # Number of MCMC restarts
   parallel: MPI #multiprocessing #MPI #multiprocessing
 
+exclude_params:
+ - tau_delta
 
 params:
   # Gas parameters
@@ -21,7 +23,7 @@ params:
 
   delta:
    prior: [0.2, 6]
-   initial_value: 2
+   initial_value: 3
    latex_name: $\delta$
 
   logM_c:
@@ -37,16 +39,16 @@ params:
   theta_co:
     prior: [0., 8]
     initial_value: 0.1
-    latex_name: $\log M_{\mathrm{co},0}$
+    latex_name: $\theta_{\mathrm{co},0}$
 
   logM_theta_co:
     prior: [10, 16]
     initial_value: 13
-    latex_name: $\log M_mathrm{co}$
+    latex_name: $\log M_{\mathrm{co}}$
 
   mu_theta_co:
-    prior: [-5., 5.]
-    initial_value: 0.
+    prior: [-5., 0.]
+    initial_value: -0.2
     latex_name: $\mu_\mathrm{co}$
 
   zeta_theta_co:
@@ -66,18 +68,18 @@ params:
     latex_name: $\log M_\mathrm{ej}$
 
   mu_theta_ej:
-    prior: [-5., 5.]
-    initial_value: 0.
+    prior: [-5., 0.]
+    initial_value: -0.2
     latex_name: $\mu_\mathrm{ej}$
 
   zeta_theta_ej:
     prior: [-5., 5.]
-    initial_value: 0.
+    initial_value: 0.2
     latex_name: $\zeta_\mathrm{ej}$
 
   # Stellar parameters
   A:
-    prior: [0., 1]
+    prior: [0., 0.1]
     initial_value: 0.045
     latex_name: $A$
 
@@ -87,12 +89,12 @@ params:
     latex_name: $\log M_{1}$
 
   tau:
-    prior: [-2, 2]
+    prior: [-2, 0]
     initial_value: -1.5
     latex_name: $\tau$
 
   eta:
-    prior: [-2, 2]
+    prior: [0., 2]
     initial_value: 0.3
     latex_name: $\eta$
 
@@ -102,7 +104,7 @@ params:
     latex_name: $\tau_{\delta}$
 
   eta_delta:
-    prior: [-2, 2]
+    prior: [0., 2]
     initial_value: 0.3
     latex_name: $\eta_{\delta}$
 
