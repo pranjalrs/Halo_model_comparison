@@ -1,8 +1,8 @@
 import joblib
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 import numpy as np
+import sys
 from tqdm import tqdm
 import yaml
 
@@ -11,43 +11,45 @@ import pyccl as ccl
 import mcmc
 import multiprocessing as mp
 
-def get_param_grid(param, p_dict, ngrid):
-	this_prior = p_dict[param]['prior']
-	this_value = p_dict[param]['initial_value']
+from utils import get_param_grid
 
-	dx = (this_prior[1] - this_prior[0])/ngrid
+def plot_Pks(rescale=True):
+	ncol = 1
+	nrow = ndim
+	fig = plt.figure(figsize=(18, ndim * 3.5))
+	subfig = fig.subfigures(nrow, ncol, wspace=0.5)
+	subfig = subfig.flatten()
 
-	assert ngrid%2!=0, 'ngrid must be odd'
-	# Check if min and max possible values are within prior
-	nstep_down = int((this_value - this_prior[0])//dx)
-	nstep_up = int((this_prior[1] - this_value)//dx)
+	all_axes = []
+	for i in range(len(subfig)):
+		ax = subfig[i].subplots(1, len(fields))
+		all_axes.append(ax)
+	all_axes = np.atleast_2d(all_axes)
 
-	if nstep_down + nstep_up + 1 > ngrid:
-		if nstep_down > nstep_up:
-			nstep_down -= 1
-		else:
-			nstep_up -= 1
+	denom_dict = {field: Pk_default_dict[field][0] if rescale else 1 for field in fields}
 
-	elif nstep_down + nstep_up + 1 < ngrid:
-		if nstep_down < nstep_up:
-			nstep_down += 1
-		else:
-			nstep_down += 1
+	for i, param in enumerate(fit_params):
+		this_range = param_range_dict[param]
 
-	param_grid = [this_value - dx*i for i in range(nstep_down, 0, -1)]
-	param_grid += [this_value]
-	param_grid += [this_value + dx*i for i in range(1, nstep_up+1)]
+		normalize = mpl.colors.Normalize(vmin=min(this_range), vmax=max(this_range))
+		scalar_map = plt.cm.ScalarMappable(norm=normalize, cmap=plt.cm.RdBu)
 
-	assert len(param_grid) == ngrid
+		for value_idx in range(ngrid):
+			for j, field in enumerate(fields):
+				all_axes[i, j].semilogx(k, Pk_dict[field][param][value_idx] / denom_dict[field],
+										c=scalar_map.to_rgba(this_range[value_idx]))
+				all_axes[i, j].text(0.1, 0.8, field, transform=all_axes[i, j].transAxes)
 
-	return param_grid
+		fig.colorbar(scalar_map, ax=all_axes[i].ravel().tolist(), label=params_dict[param]['latex_name'])
+
+	return all_axes
 
 #---------------------------------------- 1. Load Config File ----------------------------------------#
 run_parallel = False # Set this to False to run serially
-halo_model = 'Mead20'
+halo_model = sys.argv[1]
 config_path = f'../config/{halo_model}_all_default.yaml'
 
-with open(f'../config/{config_path}', 'r') as stream:
+with open(config_path, 'r') as stream:
 	config = yaml.safe_load(stream)
 
 params_dict = config['params']
@@ -57,18 +59,18 @@ latex_name = [params_dict[param]['latex_name'] for param in fit_params]
 
 ndim = len(fit_params)
 
-default_params_dict = {}  #bfg.Profiles.Mead20.Params_TAGN_7p8_MPr.copy()
+default_params_dict = {}  # bfg.Profiles.Mead20.Params_TAGN_7p8_MPr.copy()
+
+fields = ['m-m', 'm-p', 'ne-ne', 'g-ne', 'xray', 'frb']
+SAVE_PLOT = True
 #---------------------------------------- 2. Initialize Model ----------------------------------------#
 cosmo = ccl.CosmologyVanillaLCDM()
-bfg_dict = mcmc.init_bfg_model(config['halo_model'], cosmo, a=1)
+k = np.logspace(-2, 2, 500)
+bfg_dict = mcmc.init_bfg_model(config['halo_model'], cosmo, a=1, k=k)
 k = bfg_dict['k']
 mcmc.bfg_dict = bfg_dict
 
-Pk_mm_default = mcmc.get_bfg_Pk(field='m-m', param_dict=default_params_dict)
-Pk_mp_default = mcmc.get_bfg_Pk(field='m-p', param_dict=default_params_dict)
-Pk_gas_default = mcmc.get_bfg_Pk(field='ne-ne', param_dict=default_params_dict)
-Pk_xray_default = mcmc.get_bfg_Pk(field='xray', param_dict=default_params_dict)
-Pk_frb_default = mcmc.get_bfg_Pk(field='frb', param_dict=default_params_dict)
+Pk_default_dict = {field: mcmc.get_bfg_Pk(field=field, param_dict=default_params_dict) for field in fields}
 
 print('P(k) for fiducial parameters computed...')
 
@@ -77,128 +79,82 @@ params_to_run = []
 
 try:
 	all_vary_dict = joblib.load(f'../data/{halo_model}/{halo_model}_all_default_vary_dict.pkl')
-	Pk_mm_dict = all_vary_dict['Pk_mm_dict']
-	Pk_mp_dict = all_vary_dict['Pk_mp_dict']
-	Pk_gas_dict = all_vary_dict['Pk_gas_dict']
-	Pk_xray_dict = all_vary_dict['Pk_xray_dict']
-	Pk_frb_dict = all_vary_dict['Pk_frb_dict']
+	Pk_dict = all_vary_dict.copy()
 	param_range_dict = all_vary_dict['param_range_dict']
-	params_to_run = [param for param in fit_params if param not in Pk_mm_dict.keys()]
-	print('Loading precomputed P(k)s on grid...')
 
-	if len(params_to_run) == 0:
+	fields_in_dict = list(Pk_dict.keys())
+	params_in_dict = list(Pk_dict[fields[0]].keys())
+
+	fields_to_run = [field for field in fields if field not in fields_in_dict]
+	params_to_run = [param for param in fit_params if param not in params_in_dict]
+
+	# Add all fields to run to Pk_dict
+	for field in fields_to_run:
+		Pk_dict[field] = {}
+
+	if len(fields_to_run) != 0:
+		params_to_run = fit_params
+
+	print('[INFO]: Loading precomputed P(k)s for ...')
+	print('[INFO]: Fields: ', fields_in_dict)
+	print('[INFO]: Parameters: ', params_in_dict)
+
+	if len(params_to_run) == 0 and len(fields_to_run) == 0:
 		SAVE_PKL = False
 	else:
 		SAVE_PKL = True
 
-
 except FileNotFoundError:
 	print('Sampling grid...')
-	Pk_mm_dict = {}
-	Pk_mp_dict = {}
-	Pk_gas_dict = {}
-	Pk_xray_dict = {}
-	Pk_frb_dict = {}
+	Pk_dict = {field: {} for field in fields}
+	Pk_dict['k'] = k
+	Pk_dict['ngrid'] = ngrid
 	param_range_dict = {}
+
 	params_to_run = fit_params
+	fields_to_run = fields
 
 	all_vary_dict = {}
 
 	SAVE_PKL = True
 
+print('[INFO]: Parameters to run: ', params_to_run)
+print('[INFO]: Fields to run: ', fields_to_run)
 #---------------------------------------- 3. Compute P(k) ----------------------------------------#
 def compute_Pk(param):
 	param_range = get_param_grid(param, params_dict, ngrid)
-	param_range_dict[param] = param_range
 
-	Pk_mm_list = []
-	Pk_mp_list = []
-	Pk_gas_list = []
-	Pk_xray_list = []
-	Pk_frb_list = []
+	Pk_lists = {field: [] for field in fields}
 
 	print('Computing P(k)s for ', param)
 	for value in tqdm(param_range):
-		Pk_mm_list.append(mcmc.get_bfg_Pk(value, param, field='m-m')[0])
-		Pk_mp_list.append(mcmc.get_bfg_Pk(value, param, field='m-p')[0])
-		Pk_gas_list.append(mcmc.get_bfg_Pk(value, param, field='ne-ne')[0])
-		Pk_xray_list.append(mcmc.get_bfg_Pk(value, param, field='xray')[0])
-		Pk_frb_list.append(mcmc.get_bfg_Pk(value, param, field='frb')[0])
+		for field in fields_to_run:
+			Pk_lists[field].append(mcmc.get_bfg_Pk(value, param, field=field)[0])
 
-	return param, Pk_mm_list, Pk_mp_list, Pk_gas_list, Pk_xray_list, Pk_frb_list, param_range
+	return param, Pk_lists, param_range
 
-
+# Compute P(k) for each parameter
 if run_parallel:
 	with mp.Pool(processes=mp.cpu_count()) as pool:
 		results = pool.map(compute_Pk, params_to_run)
 else:
 	results = [compute_Pk(param) for param in params_to_run]
 
-for param, Pk_mm_list, Pk_mp_list, Pk_gas_list, Pk_xray_list, Pk_frb_list, param_range in results:
-	Pk_mm_dict[param] = Pk_mm_list
-	Pk_mp_dict[param] = Pk_mp_list
-	Pk_gas_dict[param] = Pk_gas_list
-	Pk_xray_dict[param] = Pk_xray_list
-	Pk_frb_dict[param] = Pk_frb_list
-	param_range_dict[param] = param_range
+# Unpack results and save in dictionary
+for param, Pk_lists, param_range in results:
+	for field in fields_to_run:
+		Pk_dict[field][param] = Pk_lists[field]
 
-all_vary_dict['Pk_mm_dict'] = Pk_mm_dict
-all_vary_dict['Pk_mp_dict'] = Pk_mp_dict
-all_vary_dict['Pk_gas_dict'] = Pk_gas_dict
-all_vary_dict['Pk_xray_dict'] = Pk_xray_dict
-all_vary_dict['Pk_frb_dict'] = Pk_frb_dict
-all_vary_dict['param_range_dict'] = param_range_dict
+		param_range_dict[param] = param_range
 
-joblib.dump(all_vary_dict, f'../data/{halo_model}/{halo_model}_all_default_vary_dict.pkl')
+Pk_dict['param_range_dict'] = param_range_dict
 
-# if SAVE_PKL:
-# 	joblib.dump(all_vary_dict, f'../data/{halo_model}/{halo_model}_all_default_vary_dict.pkl')
-
-#---------------------------------------- 3. Plot P(k) ----------------------------------------#
 if SAVE_PKL:
-	ncol = 1
-	nrow = ndim
-	fig = plt.figure(figsize=(18, ndim*3.5))
-	subfig = fig.subfigures(nrow, ncol, wspace=0.5)
-	subfig = subfig.flatten()
-
-	all_axes = []
-	for i in range(len(subfig)):
-		ax = subfig[i].subplots(1, 5)
-
-		all_axes.append(ax)
-	all_axes = np.array(all_axes)
-
-	for i, param in enumerate(fit_params):
-		this_range = param_range_dict[param]
-
-		normalize = mpl.colors.Normalize(vmin=min(this_range), vmax=max(this_range))
-		scalar_map = plt.cm.ScalarMappable(norm=normalize, cmap=plt.cm.RdBu)
-
-
-		for value_idx in range(ngrid):
-			all_axes[i, 0].semilogx(k, Pk_mm_dict[param][value_idx]/Pk_mm_default[0],
-									c=scalar_map.to_rgba(this_range[value_idx]))
-			all_axes[i, 1].semilogx(k, Pk_mp_dict[param][value_idx]/Pk_mp_default[0],
-									c=scalar_map.to_rgba(this_range[value_idx]))
-			all_axes[i, 2].semilogx(k, Pk_gas_dict[param][value_idx]/Pk_gas_default[0],
-									c=scalar_map.to_rgba(this_range[value_idx]))
-			all_axes[i, 3].semilogx(k, Pk_xray_dict[param][value_idx]/Pk_xray_default[0],
-									c=scalar_map.to_rgba(this_range[value_idx]))
-			all_axes[i, 4].semilogx(k, Pk_frb_dict[param][value_idx]/Pk_frb_default[0],
-									c=scalar_map.to_rgba(this_range[value_idx]))
-
-			all_axes[i, 0].text(0.1, 0.8, 'm-m\n (cosmic shear)', transform=all_axes[i, 0].transAxes)
-			all_axes[i, 1].text(0.1, 0.8, 'm-y\n (shear x tSZ)', transform=all_axes[i, 1].transAxes)
-			all_axes[i, 2].text(0.1, 0.8, '$n_\mathrm{e}-n_\mathrm{e}$\n (kSZ)', transform=all_axes[i, 2].transAxes)
-			all_axes[i, 3].text(0.1, 0.8, 'X-ray', transform=all_axes[i, 3].transAxes)
-			all_axes[i, 4].text(0.1, 0.8, 'FRB', transform=all_axes[i, 4].transAxes)
-
-	#     fig.subplots_adjust(right=0.8)
-	#     cbar_ax = subfig[i].add_axes([0.2, 0.9, 0.7, 0.05])
-	#     fig.colorbar(scalar_map, orientation='horizontal', cax=cbar_ax, location='top', label=param_latex_dict[name])
-		fig.colorbar(scalar_map, ax=all_axes[i].ravel().tolist(), label=params_dict[param]['latex_name'])
-
+	joblib.dump(Pk_dict, f'../data/{halo_model}/{halo_model}_all_default_vary_dict.pkl')
+#---------------------------------------- 3. Plot P(k) ----------------------------------------#
+if SAVE_PLOT:  # Change to SAVE_PKL variable
+	all_axes = plot_Pks(rescale=True)
+	for i in range(ndim):
 		all_axes[i, 0].set_ylabel('$P(k)/P(k)_\mathrm{fid}$')
 
 	for ax in all_axes.flatten():
@@ -207,101 +163,77 @@ if SAVE_PKL:
 		ax.axhline(0.95, ls=':', c='gray')
 		ax.set_xlabel('$k [h/\mathrm{Mpc}]$')
 		ax.set_ylim(0.48, 1.52)
+	plt.savefig(f'../figures/{halo_model}/Pk/Param_vary_{halo_model}.pdf')
+	plt.close()
 
-	plt.savefig(f'../figures/{halo_model}/Param_vary_{halo_model}.pdf')
+	all_axes = plot_Pks(rescale=False)
+	for i in range(ndim):
+		all_axes[i, 0].set_ylabel('$P(k)$')
+		ax.set_xlabel('$k [h/\mathrm{Mpc}]$')
+
+	for ax in all_axes.flatten():
+		ax.set_yscale('log')
+	plt.savefig(f'../figures/{halo_model}/Pk/Param_vary_{halo_model}_no_rescale.pdf')
 	plt.close()
 
 #---------------------------------------- 4. Compute derivatives and plot----------------------------------------#
-dlogPkmm_dlogtheta = {}
-dlogPkmp_dlogtheta = {}
-dlogPkgas_dlogtheta = {}
-dlogPkxray_dlogtheta = {}
-dlogPkfrb_dlogtheta = {}
+dlogPk_dlogtheta = {field: {} for field in fields}
 for i in range(ndim):
 	param = fit_params[i]
 	param_range = param_range_dict[param]
 	param_range = np.array(param_range)
 	dx = (param_range[1] - param_range[0])
 
-	if 'log' in param: mult_factor = 1
-	else: mult_factor = param_range[:, np.newaxis]
+	if 'log' in param:
+		mult_factor = 1
+	else:
+		mult_factor = param_range[:, np.newaxis]
 
-	dlogPkmm_dlogtheta[param] = np.gradient(Pk_mm_dict[param], dx, axis=0)/Pk_mm_dict[param] * mult_factor
-	dlogPkmp_dlogtheta[param] = np.gradient(Pk_mp_dict[param], dx, axis=0)/Pk_mp_dict[param] * mult_factor
-	dlogPkgas_dlogtheta[param] = np.gradient(Pk_gas_dict[param], dx, axis=0)/Pk_gas_dict[param] * mult_factor
-	dlogPkxray_dlogtheta[param] = np.gradient(Pk_xray_dict[param], dx, axis=0)/Pk_xray_dict[param] * mult_factor
-	dlogPkfrb_dlogtheta[param] = np.gradient(Pk_frb_dict[param], dx, axis=0)/Pk_frb_dict[param] * mult_factor
+	for field in fields:
+		dlogPk_dlogtheta[field][param] = np.gradient(Pk_dict[field][param], dx, axis=0) / Pk_dict[field][param] * mult_factor
 
-
-dlogPk_dlogtheta_data = {'dlogPk_mm_dlogtheta': dlogPkmm_dlogtheta,
-						 'dlogPk_mp_dlogtheta': dlogPkmp_dlogtheta,
-						 'dlogPk_gas_dlogtheta': dlogPkgas_dlogtheta,
-						 'dlogPk_xray_dlogtheta': dlogPkxray_dlogtheta,
-						 'dlogPk_frb_dlogtheta': dlogPkfrb_dlogtheta,
-						 'k': k,
-						 'params_range_dict': param_range_dict}
+dlogPk_dlogtheta_data = {f'dlogPk_{field}_dlogtheta': dlogPk_dlogtheta[field] for field in fields}
+dlogPk_dlogtheta_data.update({'k': k, 'params_range_dict': param_range_dict})
 
 # Save
 joblib.dump(dlogPk_dlogtheta_data, f'../data/{halo_model}/{halo_model}_dlogPk_dlogtheta_dict.pkl')
 
-# fig, ax = plt.subplots(nparam, 1, figsize=(12, nparam*3))
 ncol = 1
 nrow = ndim
-fig = plt.figure(figsize=(15, ndim*3.5))
+fig = plt.figure(figsize=(15, ndim * 3.5))
 subfig = fig.subfigures(nrow, ncol, wspace=0.5)
 subfig = subfig.flatten()
 
 all_axes = []
 for i in range(len(subfig)):
-	ax = subfig[i].subplots(1, 5)
-
+	ax = subfig[i].subplots(1, len(fields))
 	all_axes.append(ax)
-all_axes = np.array(all_axes)
+all_axes = np.atleast_2d(all_axes)
 
 normalize = mpl.colors.LogNorm(vmin=min(k), vmax=max(k))
 scalar_map = plt.cm.ScalarMappable(norm=normalize, cmap=plt.cm.RdBu)
 
-
-if True:
-	for i in range(ndim):
+if SAVE_PLOT:
+	print('[INFO]: Plotting dPk/dtheta...')
+	for i in tqdm(range(ndim)):
 		param = fit_params[i]
 		this_range = param_range_dict[param]
 
-
 		for value_idx in range(len(k)):
-			all_axes[i, 0].plot(this_range, dlogPkmm_dlogtheta[param][:, value_idx],
+			for j, field in enumerate(fields):
+				all_axes[i, j].plot(this_range, dlogPk_dlogtheta[field][param][:, value_idx],
 									c=scalar_map.to_rgba(k[value_idx]))
-			all_axes[i, 1].plot(this_range, dlogPkmp_dlogtheta[param][:, value_idx],
-									c=scalar_map.to_rgba(k[value_idx]))
-			all_axes[i, 2].plot(this_range, dlogPkgas_dlogtheta[param][:, value_idx],
-									c=scalar_map.to_rgba(k[value_idx]))
-			all_axes[i, 3].plot(this_range, dlogPkxray_dlogtheta[param][:, value_idx],
-									c=scalar_map.to_rgba(k[value_idx]))
-			all_axes[i, 4].plot(this_range, dlogPkfrb_dlogtheta[param][:, value_idx],
-									c=scalar_map.to_rgba(k[value_idx]))
+				all_axes[i, j].text(0.1, 0.8, field, transform=all_axes[i, j].transAxes)
 
-			all_axes[i, 0].text(0.1, 0.8, 'm-m', transform=all_axes[i, 0].transAxes)
-			all_axes[i, 1].text(0.1, 0.8, 'm-y', transform=all_axes[i, 1].transAxes)
-			all_axes[i, 2].text(0.1, 0.8, '$n_\mathrm{e}-n_\mathrm{e}$', transform=all_axes[i, 2].transAxes)
-			all_axes[i, 3].text(0.1, 0.8, 'X-ray', transform=all_axes[i, 3].transAxes)
-			all_axes[i, 4].text(0.1, 0.8, 'FRB', transform=all_axes[i, 4].transAxes)
+		this_latex_name = params_dict[param]['latex_name']
+		for j in range(len(fields)):
+			all_axes[i, j].set_xlabel(this_latex_name)
 
-			this_latex_name = params_dict[param]['latex_name']
-			all_axes[i, 0].set_xlabel(this_latex_name)
-			all_axes[i, 1].set_xlabel(this_latex_name)
-			all_axes[i, 2].set_xlabel(this_latex_name)
-			all_axes[i, 3].set_xlabel(this_latex_name)
-			all_axes[i, 4].set_xlabel(this_latex_name)
-
-	#     fig.subplots_adjust(right=0.8)
-	#     cbar_ax = subfig[i].add_axes([0.2, 0.9, 0.7, 0.05])
-	#     fig.colorbar(scalar_map, orientation='horizontal', cax=cbar_ax, location='top', label=param_latex_dict[name])
 		fig.colorbar(scalar_map, ax=all_axes[i].ravel().tolist(), label='$k\, \, [h$/Mpc]')
 
 		if 'log' not in this_latex_name:
-			all_axes[i, 0].set_ylabel('$\\frac{\mathrm{d}\, \log P(k)}{\mathrm{d}\, \log '+this_latex_name.strip('$')+'}$')
-
+			all_axes[i, 0].set_ylabel('$\\frac{\mathrm{d}\, \log P(k)}{\mathrm{d}\, \log ' + this_latex_name.strip('$') + '}$')
 		else:
-			all_axes[i, 0].set_ylabel('$\\frac{\mathrm{d}\, \log P(k)}{\mathrm{d}\, '+this_latex_name.strip('$')+'}$')
+			all_axes[i, 0].set_ylabel('$\\frac{\mathrm{d}\, \log P(k)}{\mathrm{d}\, ' + this_latex_name.strip('$') + '}$')
 
-	plt.savefig(f'../figures/{halo_model}/{halo_model}_dPk_dtheta.pdf')
+plt.savefig(f'../figures/{halo_model}/Pk/{halo_model}_dPk_dtheta.pdf')
