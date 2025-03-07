@@ -17,10 +17,10 @@ m_e     = 9.10938e-31 / Msun_to_Kg
 m_p     = 1.67262e-27 / Msun_to_Kg
 c       = 2.99792458e8 / Mpc_to_m
 
-bpar_S19 = dict(gamma = 2, delta = 3,
+bpar_S19 = dict(gamma = 2, delta = 4,
 				M_c = 1e14, mu_beta = 0.2,
-				theta_co = 0.1, M_theta_co = 13, mu_theta_co = -0.2, zeta_theta_co = 0.2,
-				theta_ej = 4, M_theta_ej = 13, mu_theta_ej = -0.2, zeta_theta_ej = 0.2,
+				theta_co = 0.1, M_theta_co = 1e13, mu_theta_co = -0.2, zeta_theta_co = 0.,
+				theta_ej = 4, M_theta_ej = 1e13, mu_theta_ej = -0.2, zeta_theta_ej = 0.,
 				eta = 0.3, eta_delta = 0.3, tau = -1.5, tau_delta = 0, #Must use tau here since we go down to low mass
 				A = 0.09/2, M1 = 10**(11.5), epsilon_h = 0.015,
 				alpha_nt = 0.18, gamma_nt = 0.8, nu_nt=0.,
@@ -29,7 +29,7 @@ bpar_S19 = dict(gamma = 2, delta = 3,
 bpar_A20 = dict(alpha_g = 2, epsilon_h = 0.015, M1_0 = 1e12,
 				alpha_fsat = 1, M1_fsat = 1, delta_fsat = 1, gamma_fsat = 1, eps_fsat = 1,
 				M_c = 1e13, eta = 0.5, mu = 0.31, beta = 0.35, epsilon_hydro = np.sqrt(5),
-				M_inn = 1e13, M_r = 10**(13.5), beta_r = 2, theta_inn = 0.2, theta_out = 2,
+				M_inn = 1e13, M_r = 10**(13.5), beta_r = 2, theta_inn = 0.3, theta_out = 2,
 				theta_rg = 0.3, sigma_rg = 0.1, a = 0.3, n = 2, p = 0.3, q = 0.707,
 				A_nt = 0.495, alpha_nt = 0.08,
 				mean_molecular_weight = 0.59)
@@ -171,3 +171,54 @@ def get_bfg_profile(param_value=None, param_name=None, comp=None, bfg_dict=None,
 			else:
 				prof.append(STAR.real(cosmo, M=M, r=r, a=a))
 		return prof
+
+def get_mass_fraction(halo_model, M, cosmo, rho, param_value=None, param_name=None, param_dict=None):
+	par = get_param_dict(param_value, param_name, param_dict, halo_model)
+	f_b = cosmo.cosmo.params.Omega_b/cosmo.cosmo.params.Omega_m
+
+	if halo_model == 'Mead20':
+		model_fbnd = np.zeros_like(M)
+		model_fej = np.zeros_like(M)
+		model_fsga = np.zeros_like(M)
+		model_fcga = np.zeros_like(M)
+
+		DMB = bfg.Profiles.Mead20.DarkMatterBaryon(**par) / rho
+
+		for imass, mass in enumerate(M):
+			model_fbnd[imass], model_fej[imass] = DMB._get_gas_frac(mass, 1, cosmo)
+			_, model_fcga[imass], model_fsga[imass] = DMB._get_star_frac(mass, 1, cosmo)
+
+
+	if halo_model == 'Schneider19':
+		for imass, mass in enumerate(M):
+			f_star = 2 * par['A'] * ((mass/par['M1'])**par['tau'] + (mass/par['M1'])**par['eta'])**-1
+			f_gas = f_b - f_star
+
+			eta_cga = par['eta'] + par['eta_delta']
+			tau_cga = par['tau'] + par['tau_delta']
+			f_cga  = 2 * par['A'] * ((mass/par['M1'])**tau_cga  + (mass/par['M1'])**eta_cga)**-1
+
+			f_sga = f_star - f_cga
+
+			model_fbnd[imass] = f_gas
+			model_fcga[imass] = f_cga
+			model_fsga[imass] = f_sga
+
+
+	if halo_model == 'Arico20':
+		BND = bfg.Profiles.Arico20.BoundGas(**bpar_A20) / rho
+
+		for imass, mass in enumerate(M):
+			model_fcga[imass] = BND._get_star_frac(mass, z=0)
+			model_fsga[imass] = BND._get_star_frac(mass, z=0, satellite=True)
+			f_hg  = f_gas / (1 + np.power(bpar_A20['M_c']/mass, bpar_A20['beta']))
+			f_rg  = (f_gas - f_hg) / (1 + np.power(bpar_A20['M_r']/mass, bpar_A20['beta_r']))
+			f_rg  = np.clip(f_rg, None, f_hg)
+			f_bg  = f_hg - f_rg
+			f_eg  = f_gas - f_hg
+
+			model_fbnd[imass] = f_hg
+			model_fej[imass] = f_eg
+
+
+	return model_fbnd, model_fej, model_fsga, model_fcga
