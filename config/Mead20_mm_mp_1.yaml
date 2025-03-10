@@ -1,0 +1,94 @@
+fields:
+  - "m-m"
+  - "m-p"
+
+halo_model: Mead20
+fit_response: True
+
+
+mcmc:
+  nwalkers: 40
+  nsteps: 2000 #000
+  burnin: 0.8  # Fraction of total steps
+  niter: 5  # Number of MCMC restarts
+  parallel: MPI
+
+exclude_params:
+ - eta
+ - sigma_star
+
+params:
+  eps1:
+    prior: [-0.95, 3]
+    initial_value: -0.1065
+    latex_name: $\epsilon_1$
+    ls: '-'
+
+  eps2:
+    prior: [-0.95, 3]
+    initial_value: 0.2
+    latex_name: $\epsilon_2$
+    ls: '-'
+
+  # Gas parameters
+  logM_0:
+    prior: [10, 16]
+    initial_value: 13.59
+    latex_name: $\log M_0$
+    ls: '-'
+
+  beta:
+    prior: [0.1, 1.5]
+    initial_value: 0.6
+    latex_name: $\beta$
+    ls: '-'
+
+  Gamma:
+    prior: [1.05, 3]
+    initial_value: 1.17
+    latex_name: $\Gamma$
+    ls: '-'
+
+  eta_b:
+    prior: [0.1, 1.5]
+    initial_value: 0.5
+    latex_name: $\eta_b$
+    ls: '-'
+
+  # Star parameters
+  A_star:
+    prior: [0.02, 0.08]
+    initial_value: 0.033
+    latex_name: $A_*$
+    ls: '-.'
+
+  logM_star:
+    prior: [10, 15]
+    initial_value: 12.45
+    latex_name: $\log M_*$
+    ls: '-.'
+
+  sigma_star:
+    prior: [0.6, 1.8]
+    initial_value: 1.2
+    latex_name: $\sigma_*$
+    ls: '-.'
+
+  eta:
+    prior: [-0.5, -0.1]
+    initial_value: -0.3
+    latex_name: $\eta$
+    ls: '-.'
+
+  # Pressure parameters
+  alpha:
+    prior: [0, 1.5]
+    initial_value: 0.847
+    latex_name: $\alpha$
+    ls: '--'
+
+  logT_w:
+    prior: [6, 7.5]
+    initial_value: 6.65
+    latex_name: $\log T_\mathrm{w}$
+    ls: '--'

@@ -1,0 +1,124 @@
+fields:
+  - "m-m"
+  - "m-p"
+
+halo_model: Schneider19
+fit_response: True
+
+mcmc:
+  nwalkers: 40
+  nsteps: 2000
+  burnin: 0.8  # Fraction of total steps
+  niter: 5  # Number of MCMC restarts; each restart runs for 300 steps
+  parallel: MPI
+
+exclude_params:
+ - zeta_theta_co
+ - zeta_theta_ej
+ - tau_delta
+
+params:
+  # Gas parameters
+  gamma:
+   prior: [0.2, 6]
+   initial_value: 2
+   latex_name: $\gamma$
+   ls: '-'
+
+  delta:
+   prior: [0.2, 6]
+   initial_value: 4
+   latex_name: $\delta$
+   ls: '-'
+
+  logM_c:
+    prior: [10, 16]
+    initial_value: 14
+    latex_name: $\log M_{\mathrm{c},0}$
+    ls: '-'
+
+  mu_beta:
+    prior: [0., 5]
+    initial_value: 0.2
+    latex_name: $\mu_\beta$
+    ls: '-'
+
+  theta_co:
+    prior: [0., 8]
+    initial_value: 0.1
+    latex_name: $\theta_{\mathrm{co},0}$
+    ls: '-'
+
+  logM_theta_co:
+    prior: [10, 16]
+    initial_value: 13
+    latex_name: $\log M_{\mathrm{co}}$
+    ls: '-'
+
+  mu_theta_co:
+    prior: [-5., 0.]
+    initial_value: -0.2
+    latex_name: $\mu_\mathrm{co}$
+    ls: '-'
+
+
+
+  theta_ej:
+    prior: [1, 8]
+    initial_value: 4
+    latex_name: $\theta_{\mathrm{ej},0}$
+    ls: '-'
+
+  logM_theta_ej:
+    prior: [10, 16]
+    initial_value: 13
+    latex_name: $\log M_\mathrm{ej}$
+    ls: '-'
+
+  mu_theta_ej:
+    prior: [-5., 0.]
+    initial_value: -0.2
+    latex_name: $\mu_\mathrm{ej}$
+    ls: '-'
+
+
+  # Stellar parameters
+  A:
+    prior: [0., 0.1]
+    initial_value: 0.045
+    latex_name: $A$
+    ls: '-.'
+
+  logM1:
+    prior: [10, 16]
+    initial_value: 11.5
+    latex_name: $\log M_{1}$
+    ls: '-.'
+
+  eta:
+    prior: [0., 2]
+    initial_value: 0.3
+    latex_name: $\eta$
+    ls: '-.'
+
+
+
+  eta_delta:
+    prior: [0., 2]
+    initial_value: 0.3
+    latex_name: $\eta_{\delta}$
+    ls: '-.'
+
+
+  # Pressure
+  alpha_nt:
+    prior: [0.01, 0.5]
+    initial_value: 0.18
+    latex_name: $\alpha_\mathrm{nt}$
+    ls: '--'
+
+  gamma_nt:
+    prior: [0., 2]
+    initial_value: 0.8
+    latex_name: $\gamma_\mathrm{nt}$
+    ls: '--'

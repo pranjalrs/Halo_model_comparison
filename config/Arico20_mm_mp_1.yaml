@@ -1,0 +1,93 @@
+fields:
+  - "m-m"
+  - "m-p"
+
+halo_model: Arico20
+fit_response: True
+
+mcmc:
+  nwalkers: 40
+  nsteps: 2000
+  burnin: 0.8  # Fraction of total steps
+  niter: 5  # Number of MCMC restarts
+  parallel: MPI
+
+
+
+params:
+  # Gas parameters
+  theta_inn:
+    prior: [0., 4.0]
+    initial_value: 0.2
+    latex_name: $\theta_\mathrm{inn}$
+    ls: '-'
+
+  theta_out:
+    prior: [0.3, 4.0]
+    initial_value: 2.
+    latex_name: $\theta_\mathrm{out}$
+    ls: '-'
+
+  logM_inn:
+    prior: [10, 16]
+    initial_value: 13
+    latex_name: $\log M_\mathrm{inn}$
+    ls: '-'
+
+  mu:
+    prior: [0.1, 1]
+    initial_value: 0.31
+    latex_name: $\mu_\mathrm{i}$
+    ls: '-'
+
+  logM_c:
+    prior: [10, 16]
+    initial_value: 13
+    latex_name: $\log M_\mathrm{c}$
+    ls: '-'
+
+
+  beta:
+    prior: [0.1, 2]
+    initial_value: 0.35
+    latex_name: $\beta$
+    ls: '--'
+
+  eta:
+    prior: [0.2, 5]
+    initial_value: 0.5
+    latex_name: $\eta$
+    ls: '--'
+
+  logM_r:
+    prior: [12, 16]
+    initial_value: 13.5
+    latex_name: $\log M_\mathrm{r}$
+    ls: '--'
+
+  beta_r:
+    prior: [0.5, 5]
+    initial_value: 2
+    latex_name: $\beta_\mathrm{r}$
+    ls: '--'
+
+
+  # Star parameters
+  logM1_0:
+    prior: [9, 16]
+    initial_value: 12
+    latex_name: $\log M_{1,0}$
+    ls: ':'
+
+  alpha_sat:
+    prior: [0.01, 1.4]
+    initial_value: 0.8
+    latex_name: $\alpha_\mathrm{sat}$
+    ls: ':'
+
+  # Pressure parameters
+  A_nt:
+    prior: [0, 1.]
+    initial_value: 0.495
+    latex_name: $A_\mathrm{nt}$
+    ls: '-.'
