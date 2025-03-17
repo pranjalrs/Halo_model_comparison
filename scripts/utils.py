@@ -35,6 +35,32 @@ bpar_A20 = dict(alpha_g = 2, epsilon_h = 0.015, M1_0 = 1e12,
 				mean_molecular_weight = 0.59)
 
 
+class HMCalculator_NoCorrection(ccl.halos.halo_model.HMCalculator):
+
+	def _integrate_over_mf(self, array_2):
+		#  ∫ dM n(M) f(M)
+		i1 = self._integrator(self._mf * array_2, self._lmass)
+		return i1 #+ self._mf0 * array_2[..., 0]
+
+	def _integrate_over_mbf(self, array_2):
+		#  ∫ dM n(M) b(M) f(M)
+		i1 = self._integrator(self._mf * self._bf * array_2, self._lmass)
+		return i1 #+ self._mbf0 * array_2[..., 0]
+
+
+class HMCalculator_NoCorrection_Flexible(bfg.utils.FlexibleHMCalculator):
+
+	def _integrate_over_mf(self, array_2):
+		#  ∫ dM n(M) f(M)
+		i1 = self._integrator(self._mf * array_2, self._lmass)
+		return i1 #+ self._mf0 * array_2[..., 0]
+
+	def _integrate_over_mbf(self, array_2):
+		#  ∫ dM n(M) b(M) f(M)
+		i1 = self._integrator(self._mf * self._bf * array_2, self._lmass)
+		return i1 #+ self._mbf0 * array_2[..., 0]
+
+
 def get_param_grid(param, p_dict, ngrid):
 	this_prior = p_dict[param]['prior']
 	this_value = p_dict[param]['initial_value']
@@ -77,7 +103,10 @@ def get_param_dict(param_values, param_names, param_dict, halo_model):
 	elif halo_model == 'Schneider19':
 		par = bpar_S19.copy()
 
-	assert (param_values is not None and param_names is not None) or param_dict is not None, 'Please provide either param_values and param_names or param_dict'
+	# assert (param_values is not None and param_names is not None) or param_dict is not None, 'Please provide either param_values and param_names or param_dict'
+	if (param_values is None and param_names is None) and param_dict is None:
+		print('Using default parameters')
+		return par
 
 	if param_dict is not None:
 		par.update(param_dict)
@@ -97,7 +126,7 @@ def get_param_dict(param_values, param_names, param_dict, halo_model):
 				par[key.split('log')[1]] = 10**val
 
 			else:
-				if key not in par.keys(): raise ValueError(f'Invalid parameter {key}!')
+				if key not in par.keys() and key != 'transition_alpha': raise ValueError(f'Invalid parameter {key}!')
 				par[key] = val
 
 
@@ -172,15 +201,15 @@ def get_bfg_profile(param_value=None, param_name=None, comp=None, bfg_dict=None,
 				prof.append(STAR.real(cosmo, M=M, r=r, a=a))
 		return prof
 
-def get_mass_fraction(halo_model, M, cosmo, rho, param_value=None, param_name=None, param_dict=None):
-	par = get_param_dict(param_value, param_name, param_dict, halo_model)
+def get_mass_fraction(halo_model, M, cosmo, rho, par):
 	f_b = cosmo.cosmo.params.Omega_b/cosmo.cosmo.params.Omega_m
 
+	model_fbnd = np.zeros_like(M)
+	model_fej = np.zeros_like(M)
+	model_fsga = np.zeros_like(M)
+	model_fcga = np.zeros_like(M)
+
 	if halo_model == 'Mead20':
-		model_fbnd = np.zeros_like(M)
-		model_fej = np.zeros_like(M)
-		model_fsga = np.zeros_like(M)
-		model_fcga = np.zeros_like(M)
 
 		DMB = bfg.Profiles.Mead20.DarkMatterBaryon(**par) / rho
 
@@ -206,13 +235,15 @@ def get_mass_fraction(halo_model, M, cosmo, rho, param_value=None, param_name=No
 
 
 	if halo_model == 'Arico20':
-		BND = bfg.Profiles.Arico20.BoundGas(**bpar_A20) / rho
+		BND = bfg.Profiles.Arico20.BoundGas(**par) / rho
 
 		for imass, mass in enumerate(M):
 			model_fcga[imass] = BND._get_star_frac(mass, z=0)
 			model_fsga[imass] = BND._get_star_frac(mass, z=0, satellite=True)
-			f_hg  = f_gas / (1 + np.power(bpar_A20['M_c']/mass, bpar_A20['beta']))
-			f_rg  = (f_gas - f_hg) / (1 + np.power(bpar_A20['M_r']/mass, bpar_A20['beta_r']))
+
+			f_gas = f_b - model_fcga[imass] - model_fsga[imass]
+			f_hg  = f_gas / (1 + np.power(par['M_c']/mass, par['beta']))
+			f_rg  = (f_gas - f_hg) / (1 + np.power(par['M_r']/mass, par['beta_r']))
 			f_rg  = np.clip(f_rg, None, f_hg)
 			f_bg  = f_hg - f_rg
 			f_eg  = f_gas - f_hg
