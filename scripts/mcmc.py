@@ -5,20 +5,20 @@ from multiprocessing import Pool
 import numpy as np
 from schwimmbad import MPIPool
 import sys
+import ultranest.stepsampler
 
 import astropy.units as u
 import astropy.constants as const
 import pyccl as ccl
 import BaryonForge as bfg
 
-from utils import get_param_dict
+import utils
 
 Pk_data = {}
 config = {}
 bfg_dict = {}
 
-h = 0.704
-Mmax = 2e15/h
+Mmax = 2e15/0.704
 Mmin = 1e9
 
 #Define relevant physical constants
@@ -36,8 +36,9 @@ m_p     = 1.67262e-27 / Msun_to_Kg
 c       = 2.99792458e8 / Mpc_to_m
 
 
-def init_bfg_model(halo_model, cosmo, a):
-	k = np.logspace(-2, 1., 100)
+
+def init_bfg_model(halo_model, cosmo, a, k=None):
+	k = np.logspace(-2, 1., 100) if k is None else k
 	a = a
 	cosmo = cosmo
 
@@ -63,9 +64,7 @@ def init_bfg_model(halo_model, cosmo, a):
 		T   = bfg.Profiles.misc.Truncation(epsilon = 100)
 		DMO = bfg.Profiles.Schneider19.DarkMatter(epsilon = 4, r_min_int = 1e-3, r_max_int = 1e2, r_steps = 500)*T/rho
 		M_2_Mtot = bfg.Profiles.misc.Mdelta_to_Mtot(DMO, r_min = 1e-6, r_max = 1e2, N_int = 100)
-		HMC_flex = bfg.utils.FlexibleHMCalculator(mass_function = 'Tinker08', halo_bias = 'Tinker10', halo_m_to_mtot = M_2_Mtot,
-										  mass_def = ccl.halos.massdef.MassDef200c,
-										  log10M_min = np.log10(Mmin), log10M_max = np.log10(Mmax), nM = 100)
+
 
 
 	#We will use the built-in, CCL halo model calculation tools.
@@ -75,14 +74,27 @@ def init_bfg_model(halo_model, cosmo, a):
 										mass_def = mdef,
 										log10M_min = np.log10(Mmin), log10M_max = np.log10(Mmax), nM = 100)
 
+	HMC_mod  = utils.HMCalculator_NoCorrection(mass_function = hmf, halo_bias = hbf,
+                                    mass_def = mdef,
+                                    log10M_min = np.log10(1e12), log10M_max = np.log10(Mmax), nM = 100)
+
 	HOD_profile =  ccl.halos.profiles.hod.HaloProfileHOD(mass_def=mdef, concentration=concentration)
 
-	if halo_model == 'Schneider19': HMC == HMC_flex
+
+	if halo_model == 'Schneider19':
+		HMC = bfg.utils.FlexibleHMCalculator(mass_function = hmf, halo_bias = hbf, halo_m_to_mtot = M_2_Mtot,
+										  mass_def = mdef,
+										  log10M_min = np.log10(Mmin), log10M_max = np.log10(Mmax), nM = 100)
+
+		HMC_mod = utils.HMCalculator_NoCorrection_Flexible(mass_function = hmf, halo_bias = hbf, halo_m_to_mtot = M_2_Mtot,
+										  mass_def = mdef,
+										  log10M_min = np.log10(Mmin), log10M_max = np.log10(Mmax), nM = 100)
+
 
 	# Compute DMO power spectrum for response calculation
 	DMO.update_precision_fftlog(**fft_precision)
 	P_mm_dmo = ccl.halos.pk_2pt.halomod_power_spectrum(cosmo, HMC, k, a, DMO)*cosmo.cosmo.params.h**3
-
+	Pk_lin = ccl.pk2d.parse_pk(cosmo)(k, a)
 	# Pressure units of data is eV/cm^3
 	cgs_to_eV_cm3__factor = (u.erg/u.cm**3).to(u.eV/u.cm**3)
 
@@ -94,20 +106,36 @@ def init_bfg_model(halo_model, cosmo, a):
 					 'rho': rho,
 					 'fft_precision': fft_precision,
 					 'mdef': mdef,
+					 'hbf': hbf,
 					 'HMC': HMC,
+					 'HMC_mod': HMC_mod,
 					 'HOD_profile': HOD_profile,
 					 'P_mm_dmo': P_mm_dmo,
+					 'Pk_lin': Pk_lin,
 					 'cgs_to_eV_cm3__factor': cgs_to_eV_cm3__factor}
 
 	return bfg_meta_dict
 
+def transition_alpha(alpha=None):
+	if alpha is not None:
+		return lambda a: alpha
+
+	else:
+		return None
+
 
 def get_bfg_Pk(param_values=None, fit_params=None, field=None, param_dict=None):
-	par = get_param_dict(param_values, fit_params, param_dict, halo_model = bfg_dict['halo_model'])
+	par = utils.get_param_dict(param_values, fit_params, param_dict, halo_model = bfg_dict['halo_model'])
 	cosmo = bfg_dict['cosmo']
 	h = cosmo.cosmo.params.h
 	f_baryon = cosmo.cosmo.params.Omega_b/cosmo.cosmo.params.Omega_m
+	smooth_transition = transition_alpha(par.get('transition_alpha', None))
 
+	HMC = bfg_dict['HMC']
+	HMC_mod = bfg_dict['HMC_mod']
+	cosmo = bfg_dict['cosmo']
+	k = bfg_dict['k']
+	a = bfg_dict['a']
 
 	if bfg_dict['halo_model'] == 'Mead20':
 		#Define profiles. Normalize to convert density --> overdensity
@@ -117,18 +145,7 @@ def get_bfg_Pk(param_values=None, fit_params=None, field=None, param_dict=None):
 		ElectronDensity = bfg.Profiles.GasNumberDensity(gas = GAS, mean_molecular_weight = 1.15, mass_def=bfg_dict['mdef']) #simple constant rescaling of gas density --> number density in cgs
 		ElectronDensity_sq = ElectronDensity**2
 
-
-		def get_fgas(mass):
-			fbnd, fej = DMB._get_gas_frac(mass, 1, bfg_dict['cosmo'])
-			return (fbnd + fej) * mass
-
-
-		mean_fgas = bfg_dict['HMC'].integrate_over_massfunc(get_fgas, bfg_dict['cosmo'], a=1)
-		mean_mass = bfg_dict['HMC'].integrate_over_massfunc(lambda mass: mass, bfg_dict['cosmo'], a=1)
-		mean_fgas = mean_fgas/mean_mass
-
-		mean_electron_density = bfg_dict['rho']/(m_p*(Mpc_to_m * m_to_cm)**3)/1.15 * mean_fgas
-		delta_ElectronDensity = ElectronDensity / mean_electron_density
+		delta_ElectronDensity = ElectronDensity / bfg_dict['rho']
 
 		for p in [DMB, PRS, GAS, ElectronDensity, ElectronDensity_sq, delta_ElectronDensity]:
 			p.update_precision_fftlog(**bfg_dict['fft_precision'])
@@ -150,19 +167,7 @@ def get_bfg_Pk(param_values=None, fit_params=None, field=None, param_dict=None):
 		DMB = DMB / bfg_dict['rho']
 		DMO = DMO / bfg_dict['rho']
 
-		def get_fgas(mass):
-			fcga = GAS._get_star_frac(mass, z=0)
-			fsga = GAS._get_star_frac(mass, z=0, satellite=True)
-
-			f_gas = f_baryon - fcga - fsga
-			return f_gas * mass
-
-		mean_fgas = bfg_dict['HMC'].integrate_over_massfunc(get_fgas, bfg_dict['cosmo'], a=1)
-		mean_mass = bfg_dict['HMC'].integrate_over_massfunc(lambda mass: mass, bfg_dict['cosmo'], a=1)
-		mean_fgas = mean_fgas/mean_mass
-
-		mean_electron_density = bfg_dict['rho']/(m_p*(Mpc_to_m * m_to_cm)**3)/1.15 * mean_fgas
-		delta_ElectronDensity = ElectronDensity / mean_electron_density
+		delta_ElectronDensity = ElectronDensity / bfg_dict['rho']
 		#Upgrade precision of all profiles.
 		for p in [DMB, DMO, PRS, ElectronDensity, ElectronDensity_sq, delta_ElectronDensity]:
 			p.update_precision_fftlog(**bfg_dict['fft_precision'])
@@ -198,19 +203,8 @@ def get_bfg_Pk(param_values=None, fit_params=None, field=None, param_dict=None):
 		DMB = DMB * T
 		DMO = DMO * T
 
-		def get_fgas(mass):
-			f_star = 2 * par['A'] * ((mass/par['M1'])**par['tau'] + (mass/par['M1'])**par['eta'])**-1
-			f_gas = f_baryon - f_star
 
-			return f_gas * mass
-
-
-		mean_fgas = bfg_dict['HMC'].integrate_over_massfunc(get_fgas, bfg_dict['cosmo'], a=1)
-		mean_mass = bfg_dict['HMC'].integrate_over_massfunc(lambda mass: mass, bfg_dict['cosmo'], a=1)
-		mean_fgas = mean_fgas / mean_mass
-
-		mean_electron_density = bfg_dict['rho']/(m_p*(Mpc_to_m * m_to_cm)**3)/1.15 * mean_fgas
-		delta_ElectronDensity = ElectronDensity / mean_electron_density
+		delta_ElectronDensity = ElectronDensity / bfg_dict['rho']
 
 		# Upgrade precision of all profiles.
 		for p in [DMB, DMO, PRS, ElectronDensity, ElectronDensity_sq, delta_ElectronDensity]:
@@ -218,34 +212,53 @@ def get_bfg_Pk(param_values=None, fit_params=None, field=None, param_dict=None):
 
 
 	if field == 'm-m':
-		Pk = ccl.halos.pk_2pt.halomod_power_spectrum(bfg_dict['cosmo'], bfg_dict['HMC'], bfg_dict['k'], bfg_dict['a'], DMB)*h**3
+		Pk = ccl.halos.pk_2pt.halomod_power_spectrum(cosmo, HMC, k, a, DMB)*h**3
 
 	elif field == 'm-p':
-		Pk = ccl.halos.pk_2pt.halomod_power_spectrum(bfg_dict['cosmo'], bfg_dict['HMC'], bfg_dict['k'], bfg_dict['a'], DMB, prof2 = PRS)*h**3
+		Pk = ccl.halos.pk_2pt.halomod_power_spectrum(cosmo, HMC, k, a,
+											   DMB, prof2 = PRS, smooth_transition=smooth_transition)*h**3
 		Pk = Pk*bfg_dict['cgs_to_eV_cm3__factor']
 
 	elif field == 'ne-ne':
-		Pk = ccl.halos.pk_2pt.halomod_power_spectrum(bfg_dict['cosmo'], bfg_dict['HMC'], bfg_dict['k'], bfg_dict['a'], ElectronDensity)*h**3
+		Pk = ccl.halos.pk_2pt.halomod_power_spectrum(cosmo, HMC, k, a,
+											   ElectronDensity, smooth_transition=smooth_transition)*h**3
 
 	elif field == 'g-ne':
-		Pk = ccl.halos.pk_2pt.halomod_power_spectrum(bfg_dict['cosmo'], bfg_dict['HMC'], bfg_dict['k'], bfg_dict['a'],
-											   ElectronDensity, prof2=bfg_dict['HOD_profile'])*h**3
+		Pk = ccl.halos.pk_2pt.halomod_power_spectrum(cosmo, HMC, k, a,
+											   ElectronDensity, prof2=bfg_dict['HOD_profile'], smooth_transition=smooth_transition)*h**3
+
+	elif field == 'h-ne':
+		# Use HMC_mod to do integral over a subset of halos
+		Pk_1h = HMC_mod.I_0_1(cosmo, k, a, ElectronDensity)
+
+		bias = lambda mass: bfg_dict['hbf'](cosmo=bfg_dict['cosmo'], M=mass, a=bfg_dict['a'])
+		integral_bias = HMC_mod.integrate_over_massfunc(bias, cosmo, a)  # Integrate halo bias over subset of halos
+		integral_prof = HMC.I_1_1(cosmo, k, a, ElectronDensity)
+
+		Pk_2h = bfg_dict['Pk_lin'] * integral_bias * integral_prof
+
+		alpha = 1 if smooth_transition is None else smooth_transition(a)
+		norm = ElectronDensity.get_normalization(cosmo, a, hmc=HMC)
+		Pk = (Pk_1h**alpha + Pk_2h**alpha)**(1/alpha) / norm
+		Pk = Pk * h**3
 
 	elif field == 'frb':
-		Pk = ccl.halos.pk_2pt.halomod_power_spectrum(bfg_dict['cosmo'], bfg_dict['HMC'], bfg_dict['k'], bfg_dict['a'], delta_ElectronDensity)*h**3
+		Pk = ccl.halos.pk_2pt.halomod_power_spectrum(cosmo, HMC, k, a,
+											   delta_ElectronDensity, smooth_transition=smooth_transition)*h**3
 
 	elif field == 'xray':
-		Pk = ccl.halos.pk_2pt.halomod_power_spectrum(bfg_dict['cosmo'], bfg_dict['HMC'], bfg_dict['k'], bfg_dict['a'], ElectronDensity_sq)*h**3
-	return Pk, bfg_dict['k']
+		Pk = ccl.halos.pk_2pt.halomod_power_spectrum(cosmo, HMC, k, a,
+											   ElectronDensity_sq, smooth_transition=smooth_transition)*h**3
+	return Pk, k
 
 
-
-def log_likelihood(param_values):
-	if param_values is not None:
-		for i, this_param in enumerate(config['fit_params']):
-			prior = config['priors'][i]
-			if not (prior[0] <= param_values[i] <= prior[1]):
-				return -np.inf
+def log_likelihood(param_values, return_total=True, apply_prior=True):
+	if apply_prior:
+		if param_values is not None:
+			for i, this_param in enumerate(config['fit_params']):
+				prior = config['priors'][i]
+				if not (prior[0] <= param_values[i] <= prior[1]):
+					return -np.inf
 
 	if not config['fit_response']:
 		raise ValueError('Please fix h units ')
@@ -253,9 +266,14 @@ def log_likelihood(param_values):
 	response_denom_data = Pk_data['dmo']['Pk'] if config['fit_response'] else 1
 
 	log_likelihood = 0.
+	log_like_field = []
 
 	for field in config['fields']:
-		Pk_theory, k = get_bfg_Pk(param_values, config['fit_params'], field)
+		try:
+			Pk_theory, k = get_bfg_Pk(param_values, config['fit_params'], field)
+		except ValueError:
+			return -1e100
+
 		Pk_sim = Pk_data[field]['Pk']/response_denom_data
 		k_sim = Pk_data[field]['k']
 		variance = Pk_data[field]['variance']/response_denom_data**2
@@ -263,9 +281,42 @@ def log_likelihood(param_values):
 		# Note that CCL uses Mpc units for k; need to convert to h/Mpc
 		Pk_theory_interp = np.interp(k_sim, k/bfg_dict['cosmo'].cosmo.params.h, Pk_theory/response_denom_theory)
 
-		log_likelihood += -0.5*np.sum((Pk_theory_interp - Pk_sim)**2/variance)
+		this_log_likelihood = -0.5*np.sum((Pk_theory_interp - Pk_sim)**2/variance)
+		log_like_field.append(this_log_likelihood)
+		log_likelihood += this_log_likelihood
 
-	return log_likelihood
+	if return_total:
+		if np.isnan(log_likelihood):
+			return -1e100
+		return log_likelihood
+
+	else:
+		return log_like_field
+
+
+def prior_transform(cube, config):
+	params = np.zeros_like(cube)
+	for i in range(config['ndim']):
+		prior = config['priors'][i]
+		low_lim, up_lim = prior[0], prior[1]
+		params[i] = cube[i] * (up_lim - low_lim) + low_lim
+
+	return params
+
+
+def run_ultranest(config, run_num=1):
+	log_likelihood_ultranest = lambda x: log_likelihood(x, return_total=True, apply_prior=False)
+	prior_transform_ultranest = lambda x: prior_transform(x, config)
+
+	sampler = ultranest.ReactiveNestedSampler(config['fit_params'], log_likelihood_ultranest, prior_transform_ultranest,
+					    log_dir=config['save_dir'], run_num=run_num, resume=True)
+	sampler.stepsampler = ultranest.stepsampler.SliceSampler(nsteps=2*len(config['fit_params']),
+					       generate_direction=ultranest.stepsampler.generate_mixture_random_direction)
+
+	sampler.run(min_num_live_points=400, show_status=True)
+	# sampler.run(min_num_live_points=4, max_iters=1, show_status=True)
+
+	return sampler
 
 
 def run_mcmc(config):
@@ -356,20 +407,22 @@ def save_summary_plots(walkers, flat_chain, config):
 		ax[i].set_ylabel(config['latex_names'][i])
 
 	plt.tight_layout()
-	plt.savefig(f'{save_dir}/HMx_traceplot.pdf', dpi=300, bbox_inches='tight')
+	plt.savefig(f'{save_dir}/traceplot.pdf', dpi=300, bbox_inches='tight')
 
 	fig = corner.corner(flat_chain, labels=config['latex_names'], show_titles=True)
-	plt.savefig(f'{save_dir}/HMx_corner.pdf', dpi=300, bbox_inches='tight')
+	plt.savefig(f'{save_dir}/corner.pdf', dpi=300, bbox_inches='tight')
 
 
-def save_best_fit(flat_chain, Pk_data, config, bfg_dict):
-	bf_params = np.mean(flat_chain, axis=0)
+def save_best_fit(bf_params, Pk_data, config, bfg_dict):
 	print('Best fit parameters: ', bf_params)
 	h = bfg_dict['cosmo'].cosmo.params.h
 
 	nfields = len(config['fields'])
 	response_denom_theory = bfg_dict['P_mm_dmo'] if config['fit_response'] else 1
 	response_denom_data = Pk_data['dmo']['Pk'] if config['fit_response'] else 1
+
+	# log likelihood
+	log_like = log_likelihood(bf_params, return_total=False)
 
 	fig, ax = plt.subplots(2, nfields, figsize=(5*nfields, 5), sharex=True, gridspec_kw={'height_ratios': [3, 1]})
 	if nfields == 1: ax = ax.reshape(2, 1)
@@ -387,16 +440,29 @@ def save_best_fit(flat_chain, Pk_data, config, bfg_dict):
 		# Pk_theory2, k = get_bfg_Pk([], [], field)
 		# Pk_theory_interp2 = np.interp(k_sim, k/h, Pk_theory2/response_denom_theory)
 
-		# import ipdb; ipdb.set_trace()
-		ax[0, i].scatter(k_sim, Pk_sim,  alpha=0.7, s=4, c='k', label='Box2/hr')
-		ax[0, i].plot(k_sim, Pk_theory_interp, ls='--', c='orangered', label='Best fit')
+		text = f'Pk {field}\n $\chi^2$: {-2*log_like[i]:.2f}\n $\chi^2_\\nu$ {-2*log_like[i]/(len(k_sim)-len(bf_params)):.2f}'
+
+		if field == 'm-p':
+			factor = 1e3
+			ylabel = ' $\\times 10^3$'
+			text_y = 0.7
+		else:
+			factor = 1
+			ylabel = ''
+			text_y = 0.2
+
+		ax[0, i].scatter(k_sim, Pk_sim*factor,  alpha=0.7, s=4, c='k', label='Box2b/hr')
+		ax[0, i].plot(k_sim, Pk_theory_interp*factor, ls='--', c='orangered', label='Best fit')
+		ax[0, i].fill_between(k_sim, Pk_sim*factor - np.sqrt(variance)*factor, Pk_sim*factor + np.sqrt(variance)*factor,
+						color='gray', alpha=0.3, linewidth=0)
 		# ax[0, i].plot(k_sim, Pk_theory_interp2, ls='--', c='limegreen', label='default')
 		ax[0, i].set_xscale('log')
-		ax[1, i].set_ylabel('R(k)')
+		ax[0, i].set_ylabel('$R_{\mathrm{'+field+'}}(k)$'+ylabel)
 		ax[1, i].set_xlabel('k [h/Mpc]')
-		ax[0, i].text(0.1, 0.7, f'Pk {field}', c='gray',weight='semibold', transform=ax[0, i].transAxes)
+		ax[0, i].text(0.1, text_y, text, c='gray', transform=ax[0, i].transAxes)
 
 		ax[1, i].plot(k_sim, Pk_theory_interp/Pk_sim - 1, ls='--', c='orangered')
+		ax[1, i].fill_between(k_sim, -np.sqrt(variance)/Pk_sim, np.sqrt(variance)/Pk_sim, color='gray', alpha=0.3, linewidth=0)
 		# ax[1, i].plot(k_sim, Pk_theory_interp2/Pk_sim - 1, ls='--', c='limegreen')
 		ax[1, i].axhline(0, ls='--', c='gray')
 		ax[1, i].set_ylim(-0.05, 0.05)
@@ -404,5 +470,5 @@ def save_best_fit(flat_chain, Pk_data, config, bfg_dict):
 		ax[1, i].set_xlabel('k [h/Mpc]')
 		ax[1, i].set_ylabel('Ratio [Theory/Sim]')
 
-	ax[0, 0].legend()
-	plt.savefig(f'{config["save_dir"]}/best_fit_Pk.pdf', dpi=300, bbox_inches='tight')
+	ax[0, 0].legend(loc='upper right')
+	return fig
