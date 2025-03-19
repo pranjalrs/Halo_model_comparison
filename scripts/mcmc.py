@@ -44,22 +44,19 @@ def init_bfg_model(halo_model, cosmo, a, k=None):
 
 	rho  = ccl.rho_x(cosmo, 1, 'matter', is_comoving = True)
 	fft_precision = dict(padding_lo_fftlog = 1e-8, padding_hi_fftlog = 1e8, n_per_decade = 100)
+	mdef = ccl.halos.MassDef(Delta="200", rho_type="critical")
+	concentration = ccl.halos.concentration.ConcentrationDiemer15(mass_def = mdef)
 
 
 	if halo_model == 'Arico20':
-		mdef = ccl.halos.MassDef(Delta="200", rho_type="critical")
 		DMO = bfg.Profiles.Arico20.DarkMatter() / rho
-		concentration = ccl.halos.concentration.ConcentrationDiemer15(mass_def = mdef)
 
 	elif halo_model == 'Mead20':
-		mdef = ccl.halos.MassDef(Delta="vir", rho_type="matter")
 		DMO = bfg.Profiles.Mead20.DarkMatter(mass_def = mdef) / rho
-		concentration = ccl.halos.concentration.ConcentrationDuffy08(mass_def = mdef)
 
 
 	elif halo_model == 'Schneider19':
 		## TO DO: Fix computation for Schneider19
-		mdef = ccl.halos.MassDef(Delta="200", rho_type="critical")
 		concentration = ccl.halos.concentration.ConcentrationDiemer15(mass_def = mdef)
 		T   = bfg.Profiles.misc.Truncation(epsilon = 100)
 		DMO = bfg.Profiles.Schneider19.DarkMatter(epsilon = 4, r_min_int = 1e-3, r_max_int = 1e2, r_steps = 500)*T/rho
@@ -68,8 +65,8 @@ def init_bfg_model(halo_model, cosmo, a, k=None):
 
 
 	#We will use the built-in, CCL halo model calculation tools.
-	hmf = ccl.halos.MassFuncSheth99(mass_def=mdef, mass_def_strict = False, use_delta_c_fit = True)
-	hbf = ccl.halos.HaloBiasSheth99(mass_def=mdef, mass_def_strict = False, use_delta_c_fit = True)
+	hmf = ccl.halos.MassFuncTinker10(mass_def=mdef, mass_def_strict = False, use_delta_c_fit = True)
+	hbf = ccl.halos.HaloBiasTinker10(mass_def=mdef, mass_def_strict = False, use_delta_c_fit = True)
 	HMC  = ccl.halos.halo_model.HMCalculator(mass_function = hmf, halo_bias = hbf,
 										mass_def = mdef,
 										log10M_min = np.log10(Mmin), log10M_max = np.log10(Mmax), nM = 100)
@@ -129,7 +126,8 @@ def get_bfg_Pk(param_values=None, fit_params=None, field=None, param_dict=None):
 	cosmo = bfg_dict['cosmo']
 	h = cosmo.cosmo.params.h
 	f_baryon = cosmo.cosmo.params.Omega_b/cosmo.cosmo.params.Omega_m
-	smooth_transition = transition_alpha(par.get('transition_alpha', None))
+	smooth_transition_p = transition_alpha(par.get('transition_alpha', None))
+	smooth_transition_ne = transition_alpha(par.get('transition_alpha_ne', None))
 
 	HMC = bfg_dict['HMC']
 	HMC_mod = bfg_dict['HMC_mod']
@@ -139,10 +137,10 @@ def get_bfg_Pk(param_values=None, fit_params=None, field=None, param_dict=None):
 
 	if bfg_dict['halo_model'] == 'Mead20':
 		#Define profiles. Normalize to convert density --> overdensity
-		DMB = bfg.Profiles.Mead20.DarkMatterBaryon(**par, mass_def = bfg_dict['mdef']) / bfg_dict['rho']
+		DMB = bfg.Profiles.Mead20.DarkMatterBaryon(**par, mass_def = bfg_dict['mdef'])/bfg_dict['rho']
 		PRS = bfg.Profiles.Mead20.Pressure(**par, mass_def=bfg_dict['mdef'])
 		GAS = bfg.Profiles.Mead20.Gas(**par, mass_def=bfg_dict['mdef'])
-		ElectronDensity = bfg.Profiles.GasNumberDensity(gas = GAS, mean_molecular_weight = 1.15, mass_def=bfg_dict['mdef']) #simple constant rescaling of gas density --> number density in cgs
+		ElectronDensity = bfg.Profiles.GasNumberDensity(gas = GAS, mean_molecular_weight = 1.14, mass_def=bfg_dict['mdef']) #simple constant rescaling of gas density --> number density in cgs
 		ElectronDensity_sq = ElectronDensity**2
 
 		delta_ElectronDensity = ElectronDensity / bfg_dict['rho']
@@ -158,7 +156,7 @@ def get_bfg_Pk(param_values=None, fit_params=None, field=None, param_dict=None):
 		STR = bfg.Profiles.Arico20.Stars(**par, r_min_int = 1e-6, r_max_int = 10, r_steps = 500)
 		CLM = bfg.Profiles.Arico20.CollisionlessMatter(**par, darkmatter = DMO, max_iter = 5, reltol = 5e-2, r_steps = 100)
 		DMB = bfg.Profiles.Arico20.DarkMatterBaryon(gas = GAS, stars = STR, collisionlessmatter = CLM)
-		ElectronDensity = bfg.Profiles.GasNumberDensity(gas = GAS, mean_molecular_weight = 1.15, mass_def=bfg_dict['mdef']) #simple constant rescaling of gas density --> number density in cgs
+		ElectronDensity = bfg.Profiles.GasNumberDensity(gas = GAS, mean_molecular_weight = 1.14, mass_def=bfg_dict['mdef']) #simple constant rescaling of gas density --> number density in cgs
 		ElectronDensity_sq = ElectronDensity**2
 
 
@@ -181,7 +179,7 @@ def get_bfg_Pk(param_values=None, fit_params=None, field=None, param_dict=None):
 		GAS = bfg.Profiles.Schneider19.Gas(**par, r_min_int = 1e-3, r_max_int = 1e2, r_steps = 500)
 		STR = bfg.Profiles.Schneider19.Stars(**par, r_min_int = 1e-6, r_max_int = 5, r_steps = 500)
 		CLM = bfg.Profiles.Schneider19.CollisionlessMatter(**par, max_iter = 5, reltol = 5e-2, r_steps = 500)
-		ElectronDensity = bfg.Profiles.GasNumberDensity(gas = GAS, mean_molecular_weight = 1.15, mass_def=bfg_dict['mdef']) #simple constant rescaling of gas density --> number density in cgs
+		ElectronDensity = bfg.Profiles.GasNumberDensity(gas = GAS, mean_molecular_weight = 1.14, mass_def=bfg_dict['mdef']) #simple constant rescaling of gas density --> number density in cgs
 		ElectronDensity_sq = ElectronDensity**2
 
 		DMB = bfg.Profiles.Schneider19.DarkMatterBaryon(**par,
@@ -216,16 +214,16 @@ def get_bfg_Pk(param_values=None, fit_params=None, field=None, param_dict=None):
 
 	elif field == 'm-p':
 		Pk = ccl.halos.pk_2pt.halomod_power_spectrum(cosmo, HMC, k, a,
-											   DMB, prof2 = PRS, smooth_transition=smooth_transition)*h**3
+											   DMB, prof2 = PRS, smooth_transition=smooth_transition_p)*h**3
 		Pk = Pk*bfg_dict['cgs_to_eV_cm3__factor']
 
 	elif field == 'ne-ne':
 		Pk = ccl.halos.pk_2pt.halomod_power_spectrum(cosmo, HMC, k, a,
-											   ElectronDensity, smooth_transition=smooth_transition)*h**3
+											   ElectronDensity, smooth_transition=smooth_transition_ne)*h**3
 
 	elif field == 'g-ne':
 		Pk = ccl.halos.pk_2pt.halomod_power_spectrum(cosmo, HMC, k, a,
-											   ElectronDensity, prof2=bfg_dict['HOD_profile'], smooth_transition=smooth_transition)*h**3
+											   ElectronDensity, prof2=bfg_dict['HOD_profile'], smooth_transition=smooth_transition_ne)*h**3
 
 	elif field == 'h-ne':
 		# Use HMC_mod to do integral over a subset of halos
@@ -237,7 +235,7 @@ def get_bfg_Pk(param_values=None, fit_params=None, field=None, param_dict=None):
 
 		Pk_2h = bfg_dict['Pk_lin'] * integral_bias * integral_prof
 
-		alpha = 1 if smooth_transition is None else smooth_transition(a)
+		alpha = 1 if smooth_transition_ne is None else smooth_transition_ne(a)
 		norm = ElectronDensity.get_normalization(cosmo, a, hmc=HMC)
 		Pk = (Pk_1h**alpha + Pk_2h**alpha)**(1/alpha) / norm
 		Pk = Pk * h**3
@@ -468,7 +466,7 @@ def save_best_fit(bf_params, Pk_data, config, bfg_dict):
 		ax[1, i].set_ylim(-0.05, 0.05)
 		ax[1, i].set_xscale('log')
 		ax[1, i].set_xlabel('k [h/Mpc]')
-		ax[1, i].set_ylabel('Ratio [Theory/Sim]')
+		ax[1, i].set_ylabel('$\Delta R(k)/R_\mathrm{sim}(k)$')
 
 	ax[0, 0].legend(loc='upper right')
 	return fig
