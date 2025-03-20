@@ -38,35 +38,35 @@ c       = 2.99792458e8 / Mpc_to_m
 
 
 def init_bfg_model(halo_model, cosmo, a, k=None):
-	k = np.logspace(-2, 1., 100) if k is None else k
+	k = np.logspace(-2, 1., 100) if k is None else k  # in 1/Mpc
 	a = a
 	cosmo = cosmo
 
 	rho  = ccl.rho_x(cosmo, 1, 'matter', is_comoving = True)
 	fft_precision = dict(padding_lo_fftlog = 1e-8, padding_hi_fftlog = 1e8, n_per_decade = 100)
 	mdef = ccl.halos.MassDef(Delta="200", rho_type="critical")
-	concentration = ccl.halos.concentration.ConcentrationDiemer15(mass_def = mdef)
+	c_M_relation = ccl.halos.concentration.ConcentrationDiemer15
 
 
 	if halo_model == 'Arico20':
-		DMO = bfg.Profiles.Arico20.DarkMatter() / rho
+		DMO = bfg.Profiles.Arico20.DarkMatter(c_M_relation=c_M_relation) / rho
 
 	elif halo_model == 'Mead20':
-		DMO = bfg.Profiles.Mead20.DarkMatter(mass_def = mdef) / rho
+		DMO = bfg.Profiles.Mead20.DarkMatter(c_M_relation=c_M_relation, mass_def = mdef) / rho
 
 
 	elif halo_model == 'Schneider19':
 		## TO DO: Fix computation for Schneider19
-		concentration = ccl.halos.concentration.ConcentrationDiemer15(mass_def = mdef)
-		T   = bfg.Profiles.misc.Truncation(epsilon = 100)
-		DMO = bfg.Profiles.Schneider19.DarkMatter(epsilon = 4, r_min_int = 1e-3, r_max_int = 1e2, r_steps = 500)*T/rho
+		DMO = bfg.Profiles.Schneider19.DarkMatter(c_M_relation=c_M_relation, epsilon = 4, r_min_int = 1e-3, r_max_int = 1e2, r_steps = 500)
 		M_2_Mtot = bfg.Profiles.misc.Mdelta_to_Mtot(DMO, r_min = 1e-6, r_max = 1e2, N_int = 100)
+		## Only convert to contrast after computing M_2_Mtot!!
+		DMO = DMO/rho
 
 
 
 	#We will use the built-in, CCL halo model calculation tools.
-	hmf = ccl.halos.MassFuncTinker10(mass_def=mdef, mass_def_strict = False, use_delta_c_fit = True)
-	hbf = ccl.halos.HaloBiasTinker10(mass_def=mdef, mass_def_strict = False, use_delta_c_fit = True)
+	hmf = ccl.halos.MassFuncTinker10(mass_def=mdef, mass_def_strict = False)
+	hbf = ccl.halos.HaloBiasTinker10(mass_def=mdef, mass_def_strict = False)
 	HMC  = ccl.halos.halo_model.HMCalculator(mass_function = hmf, halo_bias = hbf,
 										mass_def = mdef,
 										log10M_min = np.log10(Mmin), log10M_max = np.log10(Mmax), nM = 100)
@@ -75,10 +75,11 @@ def init_bfg_model(halo_model, cosmo, a, k=None):
                                     mass_def = mdef,
                                     log10M_min = np.log10(1e12), log10M_max = np.log10(Mmax), nM = 100)
 
-	HOD_profile =  ccl.halos.profiles.hod.HaloProfileHOD(mass_def=mdef, concentration=concentration)
+	HOD_profile =  ccl.halos.profiles.hod.HaloProfileHOD(mass_def=mdef, concentration=c_M_relation(mass_def=mdef))
 
 
 	if halo_model == 'Schneider19':
+		print('[INFO]: Using Flexible HM Calculator for Schneider19')
 		HMC = bfg.utils.FlexibleHMCalculator(mass_function = hmf, halo_bias = hbf, halo_m_to_mtot = M_2_Mtot,
 										  mass_def = mdef,
 										  log10M_min = np.log10(Mmin), log10M_max = np.log10(Mmax), nM = 100)
@@ -104,6 +105,7 @@ def init_bfg_model(halo_model, cosmo, a, k=None):
 					 'fft_precision': fft_precision,
 					 'mdef': mdef,
 					 'hbf': hbf,
+					 'c_M_relation': c_M_relation,
 					 'HMC': HMC,
 					 'HMC_mod': HMC_mod,
 					 'HOD_profile': HOD_profile,
@@ -121,14 +123,15 @@ def transition_alpha(alpha=None):
 		return None
 
 
-def get_bfg_Pk(param_values=None, fit_params=None, field=None, param_dict=None):
-	par = utils.get_param_dict(param_values, fit_params, param_dict, halo_model = bfg_dict['halo_model'])
+def get_bfg_Pk(par, field=None, param_dict=None):
 	cosmo = bfg_dict['cosmo']
 	h = cosmo.cosmo.params.h
 	f_baryon = cosmo.cosmo.params.Omega_b/cosmo.cosmo.params.Omega_m
 	smooth_transition_p = transition_alpha(par.get('transition_alpha', None))
 	smooth_transition_ne = transition_alpha(par.get('transition_alpha_ne', None))
 
+	c_M_relation = bfg_dict['c_M_relation']
+	mdef = bfg_dict['mdef']
 	HMC = bfg_dict['HMC']
 	HMC_mod = bfg_dict['HMC_mod']
 	cosmo = bfg_dict['cosmo']
@@ -137,10 +140,10 @@ def get_bfg_Pk(param_values=None, fit_params=None, field=None, param_dict=None):
 
 	if bfg_dict['halo_model'] == 'Mead20':
 		#Define profiles. Normalize to convert density --> overdensity
-		DMB = bfg.Profiles.Mead20.DarkMatterBaryon(**par, mass_def = bfg_dict['mdef'])/bfg_dict['rho']
-		PRS = bfg.Profiles.Mead20.Pressure(**par, mass_def=bfg_dict['mdef'])
-		GAS = bfg.Profiles.Mead20.Gas(**par, mass_def=bfg_dict['mdef'])
-		ElectronDensity = bfg.Profiles.GasNumberDensity(gas = GAS, mean_molecular_weight = 1.14, mass_def=bfg_dict['mdef']) #simple constant rescaling of gas density --> number density in cgs
+		DMB = bfg.Profiles.Mead20.DarkMatterBaryon(**par, c_M_relation=c_M_relation, mass_def = mdef)/bfg_dict['rho']
+		PRS = bfg.Profiles.Mead20.Pressure(**par, c_M_relation=c_M_relation, mass_def=mdef)
+		GAS = bfg.Profiles.Mead20.Gas(**par, c_M_relation=c_M_relation, mass_def=mdef)
+		ElectronDensity = bfg.Profiles.GasNumberDensity(gas = GAS, mean_molecular_weight = 1.14, mass_def=mdef) #simple constant rescaling of gas density --> number density in cgs
 		ElectronDensity_sq = ElectronDensity**2
 
 		delta_ElectronDensity = ElectronDensity / bfg_dict['rho']
@@ -247,7 +250,9 @@ def get_bfg_Pk(param_values=None, fit_params=None, field=None, param_dict=None):
 	elif field == 'xray':
 		Pk = ccl.halos.pk_2pt.halomod_power_spectrum(cosmo, HMC, k, a,
 											   ElectronDensity_sq, smooth_transition=smooth_transition)*h**3
-	return Pk, k
+
+    # Return Pk in [field units]x[Mpc/h]**3 and k in k/h
+	return Pk, k/h
 
 
 def log_likelihood(param_values, return_total=True, apply_prior=True):
@@ -265,10 +270,12 @@ def log_likelihood(param_values, return_total=True, apply_prior=True):
 
 	log_likelihood = 0.
 	log_like_field = []
+    
+	par = utils.get_param_dict(param_values, config['fit_params'], param_dict=None, halo_model = bfg_dict['halo_model'])
 
 	for field in config['fields']:
 		try:
-			Pk_theory, k = get_bfg_Pk(param_values, config['fit_params'], field)
+			Pk_theory, k = get_bfg_Pk(par, field)
 		except ValueError:
 			return -1e100
 
@@ -422,6 +429,8 @@ def save_best_fit(bf_params, Pk_data, config, bfg_dict):
 	# log likelihood
 	log_like = log_likelihood(bf_params, return_total=False)
 
+	par_dict = utils.get_param_dict(bf_params, config['fit_params'], param_dict=None, halo_model = bfg_dict['halo_model'])
+
 	fig, ax = plt.subplots(2, nfields, figsize=(5*nfields, 5), sharex=True, gridspec_kw={'height_ratios': [3, 1]})
 	if nfields == 1: ax = ax.reshape(2, 1)
 
@@ -431,7 +440,7 @@ def save_best_fit(bf_params, Pk_data, config, bfg_dict):
 		variance = Pk_data[field]['variance']/response_denom_data**2
 
 		# Pk_best fit
-		Pk_theory, k = get_bfg_Pk(bf_params, config['fit_params'], field)
+		Pk_theory, k = get_bfg_Pk(par_dict, field)
 		# Pk_theory, k = get_bfg_Pk([], [], field)
 		Pk_theory_interp = np.interp(k_sim, k/h, Pk_theory/response_denom_theory)
 
